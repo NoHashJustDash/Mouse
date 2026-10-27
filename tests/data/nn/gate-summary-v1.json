@@ -1,0 +1,140 @@
+{
+  "schema": 1,
+  "date": "2026-10-17",
+  "branch": "m0.2/net-conversion",
+  "scope": "CPU references; no GPU acceptance or release approval claimed",
+  "lc0_edge_corpus": {
+    "reference": "lc0-classical-v1/reference.json",
+    "positions": 27,
+    "fills": [
+      "no",
+      "fen_only",
+      "always"
+    ],
+    "selected_training_records": 81,
+    "normalized_input_policy_sha256": "731775f798fae4634a05f49977da9b7c6ddd61fd1839e0bb222ccb7d0e47ee3f",
+    "repeat_reference": "build/lc0-reference/reproduced-v1/reference.json",
+    "repeat_normalized_input_policy_sha256": "731775f798fae4634a05f49977da9b7c6ddd61fd1839e0bb222ccb7d0e47ee3f",
+    "extra_regression_reference": "equivalent-start.json",
+    "neural_weights_evaluated": false
+  },
+  "cross_language_gate": {
+    "gate": "v0.2-input-policy-10000",
+    "status": "passed",
+    "probe": "<workspace>\\.worktrees\\net-conversion\\.toolchain\\encoder-corpus-project-v1.jsonl",
+    "probe_sha256": "5df515c842a956b477d94e066d07695fde83b0ffe724f6631fc477d236b604c8",
+    "oracle_name": "Stockfish 17.1",
+    "oracle_sha256": "8f8c79837ddf2d0b7baccf555769778dd6a7e22bec823814fe19ea8bc37ff39f",
+    "positions_verified": 10000,
+    "planes_verified": 1120000,
+    "moves_verified": 228085,
+    "oracle_queries": 10000,
+    "oracle_count_cache": false,
+    "oracle_threads": 1,
+    "uci_chess960": true,
+    "white": 5012,
+    "black": 4988,
+    "full_report": "build\\encoding-gate-project-v2.json",
+    "full_report_sha256": "08a558ad6bae31e0b969e6744fa2edf0bcb3fd5371b0d60fd62ab78eda6c329b",
+    "probe_command": [
+      "build/windows-release/mouse_encoder_probe.exe",
+      ".toolchain/encoder-corpus-project-v1.jsonl"
+    ],
+    "probe_executable_sha256_at_generation": "9d66c0f78f41ac074b60694647624989bed361d7631ff92a93cef71cc4e2ea62",
+    "probe_marker": "MOUSE_ENCODER_PROBE_RESULT version=1 seed=5570765080208998401 positions=10000 white=5012 black=4988 edge_positions=49",
+    "validator_command": [
+      "python",
+      "-I",
+      "-m",
+      "mouse_tools.encoding_gate",
+      "--probe",
+      ".toolchain/encoder-corpus-project-v1.jsonl",
+      "--oracle",
+      ".toolchain/reference/stockfish-17.1.exe",
+      "--output",
+      "build/encoding-gate-project-v2.json"
+    ],
+    "retained_prior_failure": "build/encoding-gate-v1.json"
+  },
+  "converter_inputs": {
+    "positions": 1000,
+    "source_positions": 10000,
+    "shape": [
+      1000,
+      112,
+      8,
+      8
+    ],
+    "dtype": "float32",
+    "order": "C",
+    "deduplication": "exact little-endian float32 tensor bytes; no padding",
+    "npy_sha256": "e09f29c803a5cb896c150e3055b1770490a9696561c223b226e42a22cb856632",
+    "tensor_data_sha256_le_f32": "bf563dcb6c4b7e871ebf604c79b9cfc56898e7277af4f98600dae3e8c2d32a23",
+    "probe_sha256": "5df515c842a956b477d94e066d07695fde83b0ffe724f6631fc477d236b604c8",
+    "gate_report_sha256": "08a558ad6bae31e0b969e6744fa2edf0bcb3fd5371b0d60fd62ab78eda6c329b",
+    "npy": "<workspace>\\.worktrees\\net-conversion\\.toolchain\\convert\\parity-inputs-1000-v1.npy",
+    "provenance": ".toolchain\\convert\\parity-inputs-1000-v1.json",
+    "provenance_sha256": "3d7c69b4f410cf921c9d5fb4295297f4379fdc81a2992175fc3ee271ca179107",
+    "selected_records": 1000,
+    "first_id": 0,
+    "last_id": 1004,
+    "reproduced_npy": ".toolchain/convert/parity-inputs-reproduced-v1.npy",
+    "reproduced_npy_sha256": "e09f29c803a5cb896c150e3055b1770490a9696561c223b226e42a22cb856632",
+    "reproduction_selected_ids_lines_and_hashes_equal": true,
+    "helper_command": [
+      "python",
+      "-I",
+      "-m",
+      "mouse_tools.make_parity_inputs",
+      "--probe",
+      ".toolchain/encoder-corpus-project-v1.jsonl",
+      "--gate-report",
+      "build/encoding-gate-project-v2.json",
+      "--output",
+      ".toolchain/convert/parity-inputs-1000-v1.npy",
+      "--provenance",
+      ".toolchain/convert/parity-inputs-1000-v1.json"
+    ]
+  },
+  "converter_cpu_parity": {
+    "full_report": ".toolchain\\convert\\full-parity-1000-v1.json",
+    "full_report_sha256": "0ad54b9587024985089b42853e56b870e8eec50d162ef8efc79da31d11e0315a",
+    "positions": 1000,
+    "distinct_positions": 1000,
+    "tolerance": 0.0001,
+    "diagnostic": false,
+    "passed": true,
+    "gate_satisfied": true,
+    "max_abs": {
+      "policy": 0.0,
+      "wdl": 0.0,
+      "mlh": 0.0
+    },
+    "worst_position": {
+      "policy": 0,
+      "wdl": 0,
+      "mlh": 0
+    },
+    "providers": [
+      "CPUExecutionProvider"
+    ],
+    "optimized": true,
+    "source_sha256": "bc27a6cae8ad36f2b9a80a6ad9dabb0d6fda25b1e7f481a79bc359e14f563406",
+    "converted_sha256": "127d2f344094a430e7d6c5f1bd883993d392e1cc4e17b237925255f46bde2a75",
+    "reference_sha256": "0e2699c19b617781d4fbe3d00286756b125836a30c0658afc620e197bec35d04",
+    "inputs_sha256": "e09f29c803a5cb896c150e3055b1770490a9696561c223b226e42a22cb856632"
+  },
+  "current_source_sha256": {
+    "tools/src/mouse_tools/encoding.py": "3d64a758e4c1f3b71ca373b97871fbfcdf1c8ad3c9383c45f23737d20d8b2bb9",
+    "tools/src/mouse_tools/lc0_reference.py": "28f1ce0f059d8858db6e691df639c8095571ed427c1db133f9ec4ba7e74417ec",
+    "tools/src/mouse_tools/encoding_gate.py": "6b9f5fa8f21bd82cb5b39f2f021f9930de77853443d8aae13fef1fb30e6d9251",
+    "tools/src/mouse_tools/reference_corpus.py": "96855d057b18e357b2c8a8ff444c93e9a5ac13fa30c634caf5c58bf6df9d2212",
+    "tools/src/mouse_tools/make_parity_inputs.py": "9cca1e86055a4df822257010b1d17174bbeca9c535d731de63a0baf4ccf47324",
+    "tools/tests/test_encoding.py": "60dd9f67aa6f29ace6468489567a33f1c000950359b0d18e6e27378beed28333",
+    "tools/tests/test_lc0_reference.py": "9e1bf7ab4b8cb5bd45ba99326bcb54d462453a406416d4826e68cb4bb254da21",
+    "tools/tests/test_encoding_gate.py": "5ce7a86f5f2a454b2e9044fc0f92e7b35b6fb0d3531a9ab77a5b2dadd527ecb6",
+    "tools/tests/test_lc0_reference_corpus.py": "b31cccab5f494ae2b3e85436e4f562ca8351fe02da5c2a64f3fc1029fad9547b",
+    "tools/tests/test_encoding_parity_inputs.py": "1157d651693369a37fe1aa00df705b4dbc652b627a9c19436b271586f25a07c9"
+  },
+  "source_note": "Hashes describe final tooling after equivalent-FEN start-identity and strict report-count regressions. The retained cross-language run predates those input-boundary fixes; final installed helper reproduced identical NPY bytes and selected provenance."
+}

@@ -1,0 +1,22 @@
+info depth 1 seldepth 2 time 0 nodes 2 score cp 120 tbhits 0 pv h8h1 c1b2
+info depth 2 seldepth 3 time 0 nodes 3 score cp 115 tbhits 0 pv h8h1 c1b2 h1h2
+info depth 2 seldepth 3 time 0 nodes 5 score cp 129 tbhits 0 pv g8g7 c1b2 g7f7
+info depth 2 seldepth 3 time 0 nodes 9 score cp 169 tbhits 0 pv h8h2 c1d1 h2h3
+info depth 2 seldepth 4 time 0 nodes 13 score cp 168 tbhits 0 pv h8h2 c1b1 h2h3
+info depth 2 seldepth 5 time 0 nodes 22 score cp 166 tbhits 0 pv h8h2 c1d1 h2h3 d1c2
+info depth 3 seldepth 5 time 1 nodes 30 score cp 166 tbhits 0 pv h8h2 c1d1 h2h3 d1c2
+info depth 3 seldepth 5 time 1 nodes 32 score cp 123 tbhits 0 pv h8h1 c1b2 h1h2 b2c3 h2h3
+info string g8h8  (153 ) N:       0 (+ 0) (P:  4.17%) (WL:  -.-----) (D: -.---) (M:  -.-) (Q:  0.46184) (U: 0.40587) (S:  0.86771) (V:  -.----) 
+info string h8h6  (183 ) N:       0 (+ 0) (P:  4.75%) (WL:  -.-----) (D: -.---) (M:  -.-) (Q:  0.46184) (U: 0.46230) (S:  0.92414) (V:  -.----) 
+info string h8h7  (180 ) N:       1 (+ 0) (P:  6.48%) (WL:  0.65781) (D: 0.000) (M:  0.0) (Q:  0.65781) (U: 0.31528) (S:  0.97309) (V:  -.----) 
+info string g8f8  (152 ) N:       2 (+ 0) (P:  6.96%) (WL:  0.72727) (D: 0.000) (M:  0.5) (Q:  0.72727) (U: 0.22583) (S:  0.95310) (V:  -.----) 
+info string g8h7  (157 ) N:       2 (+ 0) (P:  7.91%) (WL:  0.71518) (D: 0.000) (M:  0.5) (Q:  0.71518) (U: 0.25662) (S:  0.97180) (V:  -.----) 
+info string h8h5  (185 ) N:       3 (+ 0) (P:  6.79%) (WL:  0.77740) (D: 0.000) (M:  1.0) (Q:  0.77740) (U: 0.16514) (S:  0.94253) (V:  -.----) 
+info string h8h4  (187 ) N:       3 (+ 0) (P:  7.86%) (WL:  0.78916) (D: 0.000) (M:  1.0) (Q:  0.78916) (U: 0.19135) (S:  0.98051) (V:  -.----) 
+info string h8h3  (189 ) N:       3 (+ 0) (P:  8.54%) (WL:  0.80093) (D: 0.000) (M:  1.0) (Q:  0.80093) (U: 0.20791) (S:  1.00884) (V:  -.----) 
+info string g8f7  (155 ) N:       4 (+ 0) (P: 11.66%) (WL:  0.78077) (D: 0.000) (M:  1.5) (Q:  0.78077) (U: 0.22704) (S:  1.00781) (V:  -.----) 
+info string g8g7  (156 ) N:       4 (+ 0) (P: 12.45%) (WL:  0.77938) (D: 0.000) (M:  1.5) (Q:  0.77938) (U: 0.24242) (S:  1.02181) (V:  -.----) 
+info string h8h2  (191 ) N:       4 (+ 0) (P:  9.82%) (WL:  0.83358) (D: 0.000) (M:  1.0) (Q:  0.83358) (U: 0.19110) (S:  1.02468) (V:  -.----) 
+info string h8h1  (193 ) N:       5 (+ 0) (P: 12.60%) (WL:  0.77912) (D: 0.000) (M:  1.4) (Q:  0.77912) (U: 0.20434) (S:  0.98347) (V:  -.----) 
+info string node  (  12) N:      32 (+ 0) (P: 91.08%) (WL:  0.77678) (D: 0.000) (M:  2.0) (Q:  0.77678) (V:  -.----) 
+bestmove h8h1 ponder c1b2

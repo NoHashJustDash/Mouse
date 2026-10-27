@@ -1,0 +1,372 @@
+{
+  "algorithm": "bounded legal-oracle AND/OR, odd horizons 1,3,5; all winning root moves",
+  "cached_positions": 40352,
+  "candidate_count_examined": 517,
+  "cases": [
+    {
+      "fen": "8/1q6/8/8/8/2k5/8/K7 b - - 0 1",
+      "id": "mate1_b_1",
+      "mate": 1,
+      "new_oracle_queries": 22,
+      "pv": [
+        "b7b2"
+      ],
+      "refuted_horizons": [],
+      "states": 1739,
+      "winning_moves": [
+        "b7b2"
+      ]
+    },
+    {
+      "fen": "6r1/8/8/8/8/1k6/8/K7 b - - 0 1",
+      "id": "mate1_b_2",
+      "mate": 1,
+      "new_oracle_queries": 4,
+      "pv": [
+        "g8g1"
+      ],
+      "refuted_horizons": [],
+      "states": 7547,
+      "winning_moves": [
+        "g8g1"
+      ]
+    },
+    {
+      "fen": "8/8/8/8/8/1k6/8/Kn1q4 b - - 0 1",
+      "id": "mate1_b_3",
+      "mate": 1,
+      "new_oracle_queries": 24,
+      "pv": [
+        "b1a3"
+      ],
+      "refuted_horizons": [],
+      "states": 29196,
+      "winning_moves": [
+        "b1a3",
+        "b1c3",
+        "b1d2"
+      ]
+    },
+    {
+      "fen": "k7/8/2K5/8/8/8/1Q6/8 w - - 0 1",
+      "id": "mate1_w_1",
+      "mate": 1,
+      "new_oracle_queries": 0,
+      "pv": [
+        "b2b7"
+      ],
+      "refuted_horizons": [],
+      "states": 1717,
+      "winning_moves": [
+        "b2b7"
+      ]
+    },
+    {
+      "fen": "k7/8/1K6/8/8/8/8/6R1 w - - 0 1",
+      "id": "mate1_w_2",
+      "mate": 1,
+      "new_oracle_queries": 0,
+      "pv": [
+        "g1g8"
+      ],
+      "refuted_horizons": [],
+      "states": 7543,
+      "winning_moves": [
+        "g1g8"
+      ]
+    },
+    {
+      "fen": "kN1Q4/8/1K6/8/8/8/8/8 w - - 0 1",
+      "id": "mate1_w_3",
+      "mate": 1,
+      "new_oracle_queries": 0,
+      "pv": [
+        "b8a6"
+      ],
+      "refuted_horizons": [],
+      "states": 29172,
+      "winning_moves": [
+        "b8a6",
+        "b8c6",
+        "b8d7"
+      ]
+    },
+    {
+      "fen": "8/8/8/5q2/8/2k5/8/K7 b - - 0 1",
+      "id": "mate2_b_1",
+      "mate": 2,
+      "new_oracle_queries": 372,
+      "pv": [
+        "c3c2",
+        "a1a2",
+        "f5a5"
+      ],
+      "refuted_horizons": [
+        1
+      ],
+      "states": 745,
+      "winning_moves": [
+        "c3c2",
+        "f5b5",
+        "f5f2"
+      ]
+    },
+    {
+      "fen": "8/8/8/5r2/8/2k5/8/K7 b - - 0 1",
+      "id": "mate2_b_2",
+      "mate": 2,
+      "new_oracle_queries": 251,
+      "pv": [
+        "c3b3",
+        "a1b1",
+        "f5f1"
+      ],
+      "refuted_horizons": [
+        1
+      ],
+      "states": 3006,
+      "winning_moves": [
+        "c3b3",
+        "c3c2"
+      ]
+    },
+    {
+      "fen": "8/8/8/8/8/2k5/8/Kn1q4 b - - 0 1",
+      "id": "mate2_b_3",
+      "mate": 2,
+      "new_oracle_queries": 298,
+      "pv": [
+        "b1d2",
+        "a1a2",
+        "d1a4"
+      ],
+      "refuted_horizons": [
+        1
+      ],
+      "states": 24747,
+      "winning_moves": [
+        "b1d2",
+        "d1c1",
+        "d1d2",
+        "d1e2"
+      ]
+    },
+    {
+      "fen": "k7/8/2K5/8/5Q2/8/8/8 w - - 0 1",
+      "id": "mate2_w_1",
+      "mate": 2,
+      "new_oracle_queries": 0,
+      "pv": [
+        "c6c7",
+        "a8a7",
+        "f4a4"
+      ],
+      "refuted_horizons": [
+        1
+      ],
+      "states": 373,
+      "winning_moves": [
+        "c6c7",
+        "f4b4",
+        "f4f7"
+      ]
+    },
+    {
+      "fen": "k7/8/2K5/8/5R2/8/8/8 w - - 0 1",
+      "id": "mate2_w_2",
+      "mate": 2,
+      "new_oracle_queries": 0,
+      "pv": [
+        "c6b6",
+        "a8b8",
+        "f4f8"
+      ],
+      "refuted_horizons": [
+        1
+      ],
+      "states": 2755,
+      "winning_moves": [
+        "c6b6",
+        "c6c7"
+      ]
+    },
+    {
+      "fen": "kN1Q4/8/2K5/8/8/8/8/8 w - - 0 1",
+      "id": "mate2_w_3",
+      "mate": 2,
+      "new_oracle_queries": 0,
+      "pv": [
+        "b8d7",
+        "a8a7",
+        "d8a5"
+      ],
+      "refuted_horizons": [
+        1
+      ],
+      "states": 24449,
+      "winning_moves": [
+        "b8d7",
+        "d8c8",
+        "d8d7",
+        "d8e7"
+      ]
+    },
+    {
+      "fen": "8/8/8/8/8/2k5/1r6/K7 b - - 0 1",
+      "id": "mate3_b_1",
+      "mate": 3,
+      "new_oracle_queries": 1098,
+      "pv": [
+        "b2b3",
+        "a1a2",
+        "c3c2",
+        "a2a1",
+        "b3a3"
+      ],
+      "refuted_horizons": [
+        1,
+        2
+      ],
+      "states": 5966,
+      "winning_moves": [
+        "b2b3",
+        "b2c2"
+      ]
+    },
+    {
+      "fen": "8/8/8/8/2k5/1q6/8/K7 b - - 0 1",
+      "id": "mate3_b_2",
+      "mate": 3,
+      "new_oracle_queries": 1643,
+      "pv": [
+        "b3b4",
+        "a1a2",
+        "c4c3",
+        "a2a1",
+        "b4b2"
+      ],
+      "refuted_horizons": [
+        1,
+        2
+      ],
+      "states": 10650,
+      "winning_moves": [
+        "b3b4",
+        "b3b5",
+        "b3b6",
+        "b3b7",
+        "b3b8"
+      ]
+    },
+    {
+      "fen": "8/8/8/8/3k4/8/8/Kn1q4 b - - 0 1",
+      "id": "mate3_b_3",
+      "mate": 3,
+      "new_oracle_queries": 4040,
+      "pv": [
+        "b1c3",
+        "a1b2",
+        "d4c4",
+        "b2a3",
+        "d1a1"
+      ],
+      "refuted_horizons": [
+        1,
+        2
+      ],
+      "states": 40352,
+      "winning_moves": [
+        "b1c3",
+        "b1d2",
+        "d1c1",
+        "d1d2",
+        "d1e2",
+        "d4c3",
+        "d4c4"
+      ]
+    },
+    {
+      "fen": "k7/1R6/2K5/8/8/8/8/8 w - - 0 1",
+      "id": "mate3_w_1",
+      "mate": 3,
+      "new_oracle_queries": 0,
+      "pv": [
+        "b7b6",
+        "a8a7",
+        "c6c7",
+        "a7a8",
+        "b6a6"
+      ],
+      "refuted_horizons": [
+        1,
+        2
+      ],
+      "states": 4868,
+      "winning_moves": [
+        "b7b6",
+        "b7c7"
+      ]
+    },
+    {
+      "fen": "k7/8/1Q6/2K5/8/8/8/8 w - - 0 1",
+      "id": "mate3_w_2",
+      "mate": 3,
+      "new_oracle_queries": 0,
+      "pv": [
+        "b6b1",
+        "a8a7",
+        "c5c6",
+        "a7a6",
+        "b1a1"
+      ],
+      "refuted_horizons": [
+        1,
+        2
+      ],
+      "states": 9007,
+      "winning_moves": [
+        "b6b1",
+        "b6b2",
+        "b6b3",
+        "b6b4",
+        "b6b5"
+      ]
+    },
+    {
+      "fen": "kN1Q4/8/8/3K4/8/8/8/8 w - - 0 1",
+      "id": "mate3_w_3",
+      "mate": 3,
+      "new_oracle_queries": 0,
+      "pv": [
+        "b8c6",
+        "a8b7",
+        "d5c5",
+        "b7a6",
+        "d8a8"
+      ],
+      "refuted_horizons": [
+        1,
+        2
+      ],
+      "states": 36312,
+      "winning_moves": [
+        "b8c6",
+        "b8d7",
+        "d5c5",
+        "d5c6",
+        "d8c8",
+        "d8d7",
+        "d8e7"
+      ]
+    }
+  ],
+  "generator_sha256": "20cab313ea7d063a827bd4c780d5676057bf329600a9c7eae10d587a5d09e2f5",
+  "maximum_states": 200000,
+  "memo_entries": 49668,
+  "mouse_node_budgets": null,
+  "oracle_name": "Stockfish 17.1",
+  "oracle_queries": 40352,
+  "oracle_sha256": "8f8c79837ddf2d0b7baccf555769778dd6a7e22bec823814fe19ea8bc37ff39f",
+  "schema": 1,
+  "seed": 20261017
+}

@@ -1,0 +1,19 @@
+# Original Mouse exact mate fixtures; see provenance.json and README.md.
+8/1q6/8/8/8/2k5/8/K7 b - - 0 1 ; id "mate1_b_1"; variant standard; dm 1; bm b7b2;
+6r1/8/8/8/8/1k6/8/K7 b - - 0 1 ; id "mate1_b_2"; variant standard; dm 1; bm g8g1;
+8/8/8/8/8/1k6/8/Kn1q4 b - - 0 1 ; id "mate1_b_3"; variant standard; dm 1; bm b1a3 b1c3 b1d2;
+k7/8/2K5/8/8/8/1Q6/8 w - - 0 1 ; id "mate1_w_1"; variant standard; dm 1; bm b2b7;
+k7/8/1K6/8/8/8/8/6R1 w - - 0 1 ; id "mate1_w_2"; variant standard; dm 1; bm g1g8;
+kN1Q4/8/1K6/8/8/8/8/8 w - - 0 1 ; id "mate1_w_3"; variant standard; dm 1; bm b8a6 b8c6 b8d7;
+8/8/8/5q2/8/2k5/8/K7 b - - 0 1 ; id "mate2_b_1"; variant standard; dm 2; bm c3c2 f5b5 f5f2;
+8/8/8/5r2/8/2k5/8/K7 b - - 0 1 ; id "mate2_b_2"; variant standard; dm 2; bm c3b3 c3c2;
+8/8/8/8/8/2k5/8/Kn1q4 b - - 0 1 ; id "mate2_b_3"; variant standard; dm 2; bm b1d2 d1c1 d1d2 d1e2;
+k7/8/2K5/8/5Q2/8/8/8 w - - 0 1 ; id "mate2_w_1"; variant standard; dm 2; bm c6c7 f4b4 f4f7;
+k7/8/2K5/8/5R2/8/8/8 w - - 0 1 ; id "mate2_w_2"; variant standard; dm 2; bm c6b6 c6c7;
+kN1Q4/8/2K5/8/8/8/8/8 w - - 0 1 ; id "mate2_w_3"; variant standard; dm 2; bm b8d7 d8c8 d8d7 d8e7;
+8/8/8/8/8/2k5/1r6/K7 b - - 0 1 ; id "mate3_b_1"; variant standard; dm 3; bm b2b3 b2c2;
+8/8/8/8/2k5/1q6/8/K7 b - - 0 1 ; id "mate3_b_2"; variant standard; dm 3; bm b3b4 b3b5 b3b6 b3b7 b3b8;
+8/8/8/8/3k4/8/8/Kn1q4 b - - 0 1 ; id "mate3_b_3"; variant standard; dm 3; bm b1c3 b1d2 d1c1 d1d2 d1e2 d4c3 d4c4;
+k7/1R6/2K5/8/8/8/8/8 w - - 0 1 ; id "mate3_w_1"; variant standard; dm 3; bm b7b6 b7c7;
+k7/8/1Q6/2K5/8/8/8/8 w - - 0 1 ; id "mate3_w_2"; variant standard; dm 3; bm b6b1 b6b2 b6b3 b6b4 b6b5;
+kN1Q4/8/8/3K4/8/8/8/8 w - - 0 1 ; id "mate3_w_3"; variant standard; dm 3; bm b8c6 b8d7 d5c5 d5c6 d8c8 d8d7 d8e7;

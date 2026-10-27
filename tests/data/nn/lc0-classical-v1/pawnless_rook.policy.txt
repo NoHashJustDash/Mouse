@@ -1,0 +1,25 @@
+info depth 1 seldepth 2 time 0 nodes 2 score cp 152 tbhits 0 pv e1f2 e8f7
+info depth 2 seldepth 3 time 0 nodes 3 score cp 129 tbhits 0 pv e1f2 e8f7 f2e3
+info depth 2 seldepth 3 time 0 nodes 5 score cp 131 tbhits 0 pv c1c8 e8f7 c8c7
+info depth 2 seldepth 3 time 0 nodes 7 score cp 186 tbhits 0 pv c1c7 e8d8 c7b7
+info depth 2 seldepth 4 time 0 nodes 8 score cp 180 tbhits 0 pv c1c7 e8d8 c7b7 d8c8
+info depth 2 seldepth 5 time 0 nodes 23 score cp 178 tbhits 0 pv c1c7 e8d8 c7b7 d8c8
+info depth 3 seldepth 5 time 1 nodes 31 score cp 170 tbhits 0 pv c1c7 e8d8 c7b7 d8c8 b7b6
+info depth 3 seldepth 5 time 1 nodes 32 score cp 172 tbhits 0 pv c1c7 e8d8 c7b7 d8c8 b7b6
+info string e1d2  (105 ) N:       0 (+ 0) (P:  4.19%) (WL:  -.-----) (D: -.---) (M:  -.-) (Q:  0.50803) (U: 0.40824) (S:  0.91628) (V:  -.----) 
+info string e1f1  (101 ) N:       0 (+ 0) (P:  4.20%) (WL:  -.-----) (D: -.---) (M:  -.-) (Q:  0.50803) (U: 0.40854) (S:  0.91657) (V:  -.----) 
+info string e1e2  (106 ) N:       0 (+ 0) (P:  4.50%) (WL:  -.-----) (D: -.---) (M:  -.-) (Q:  0.50803) (U: 0.43780) (S:  0.94583) (V:  -.----) 
+info string c1a1  (47  ) N:       0 (+ 0) (P:  4.72%) (WL:  -.-----) (D: -.---) (M:  -.-) (Q:  0.50803) (U: 0.45977) (S:  0.96781) (V:  -.----) 
+info string e1d1  (100 ) N:       0 (+ 0) (P:  5.62%) (WL:  -.-----) (D: -.---) (M:  -.-) (Q:  0.50803) (U: 0.54665) (S:  1.05468) (V:  -.----) 
+info string c1c2  (56  ) N:       2 (+ 0) (P:  7.01%) (WL:  0.70563) (D: 0.000) (M:  0.5) (Q:  0.70563) (U: 0.22741) (S:  0.93304) (V:  -.----) 
+info string c1c3  (61  ) N:       2 (+ 0) (P:  5.71%) (WL:  0.74966) (D: 0.000) (M:  0.5) (Q:  0.74966) (U: 0.18529) (S:  0.93495) (V:  -.----) 
+info string c1d1  (49  ) N:       2 (+ 0) (P:  7.18%) (WL:  0.73333) (D: 0.000) (M:  0.5) (Q:  0.73333) (U: 0.23286) (S:  0.96619) (V:  -.----) 
+info string c1b1  (48  ) N:       2 (+ 0) (P:  6.28%) (WL:  0.76750) (D: 0.000) (M:  0.5) (Q:  0.76750) (U: 0.20385) (S:  0.97135) (V:  -.----) 
+info string c1c4  (64  ) N:       2 (+ 0) (P:  5.89%) (WL:  0.84383) (D: 0.000) (M:  0.5) (Q:  0.84383) (U: 0.19108) (S:  1.03491) (V:  -.----) 
+info string c1c5  (66  ) N:       3 (+ 0) (P:  6.48%) (WL:  0.82681) (D: 0.000) (M:  1.0) (Q:  0.82681) (U: 0.15779) (S:  0.98460) (V:  -.----) 
+info string c1c6  (68  ) N:       3 (+ 0) (P:  6.70%) (WL:  0.83293) (D: 0.000) (M:  1.0) (Q:  0.83293) (U: 0.16313) (S:  0.99607) (V:  -.----) 
+info string e1f2  (107 ) N:       4 (+ 0) (P: 11.10%) (WL:  0.77900) (D: 0.000) (M:  1.5) (Q:  0.77900) (U: 0.21611) (S:  0.99510) (V:  -.----) 
+info string c1c8  (71  ) N:       4 (+ 0) (P: 10.59%) (WL:  0.79503) (D: 0.000) (M:  1.5) (Q:  0.79503) (U: 0.20607) (S:  1.00110) (V:  -.----) 
+info string c1c7  (70  ) N:       7 (+ 0) (P:  9.82%) (WL:  0.83954) (D: 0.000) (M:  1.6) (Q:  0.83954) (U: 0.11947) (S:  0.95901) (V:  -.----) 
+info string node  (  15) N:      32 (+ 0) (P: 76.77%) (WL:  0.79718) (D: 0.000) (M:  2.0) (Q:  0.79718) (V:  -.----) 
+bestmove c1c7 ponder e8d8

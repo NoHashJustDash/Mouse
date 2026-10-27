@@ -1,0 +1,20 @@
+info depth 1 seldepth 2 time 0 nodes 2 score cp 47 tbhits 0 pv e4d3 e1f2
+info depth 2 seldepth 3 time 0 nodes 3 score cp 38 tbhits 0 pv e4d3 e1f2 d3d2
+info depth 2 seldepth 4 time 0 nodes 6 score cp 46 tbhits 0 pv e4d3 e1f2 d3d2 f2e3
+info depth 2 seldepth 5 time 0 nodes 7 score cp 48 tbhits 0 pv e4d3 e1f2 d3d2 f2e3 d2d1q
+info depth 3 seldepth 5 time 0 nodes 12 score cp 51 tbhits 0 pv e4d3 e1f2 d3d2 f2e3 d2d1q
+info depth 2 seldepth 5 time 0 nodes 13 score cp 51 tbhits 0 pv e4d3 e1f2 d3d2 f2e3 d2d1q
+info depth 3 seldepth 5 time 0 nodes 16 score cp 46 tbhits 0 pv e4d3 e1f2 d3d2 f2e3 d2d1q
+info depth 2 seldepth 5 time 0 nodes 17 score cp 46 tbhits 0 pv e4d3 e1f2 d3d2 f2e3 d2d1q
+info depth 3 seldepth 5 time 0 nodes 18 score cp 46 tbhits 0 pv e4d3 e1f2 d3d2 f2e3 d2d1q
+info depth 3 seldepth 6 time 0 nodes 23 score cp 52 tbhits 0 pv e4d3 e1f2 d3d2 f2e3 d2d1q e3f2
+info depth 3 seldepth 6 time 0 nodes 32 score cp 36 tbhits 0 pv e4d3 e1d2 e8f7 d2d3
+info string e8f8  (101 ) N:       1 (+ 0) (P:  8.18%) (WL:  0.13355) (D: 0.000) (M:  0.0) (Q:  0.13355) (U: 0.39785) (S:  0.53139) (V:  -.----) 
+info string e8e7  (106 ) N:       1 (+ 0) (P:  8.76%) (WL:  0.16366) (D: 0.000) (M:  0.0) (Q:  0.16366) (U: 0.42636) (S:  0.59003) (V:  -.----) 
+info string e8d7  (105 ) N:       1 (+ 0) (P:  8.17%) (WL:  0.24445) (D: 0.000) (M:  0.0) (Q:  0.24445) (U: 0.39755) (S:  0.64200) (V:  -.----) 
+info string e8d8  (100 ) N:       1 (+ 0) (P: 10.96%) (WL:  0.12081) (D: 0.000) (M:  0.0) (Q:  0.12081) (U: 0.53329) (S:  0.65409) (V:  -.----) 
+info string e8f7  (107 ) N:       3 (+ 0) (P: 21.66%) (WL:  0.13857) (D: 0.000) (M:  1.0) (Q:  0.13857) (U: 0.52690) (S:  0.66546) (V:  -.----) 
+info string e4e3  (1042) N:       3 (+ 0) (P: 19.97%) (WL:  0.26139) (D: 0.000) (M:  1.0) (Q:  0.26139) (U: 0.48591) (S:  0.74730) (V:  -.----) 
+info string e4d3  (1041) N:      21 (+ 0) (P: 22.31%) (WL:  0.43388) (D: 0.188) (M:  2.2) (Q:  0.43388) (U: 0.09869) (S:  0.53175) (V:  -.----) 
+info string node  (   7) N:      32 (+ 0) (P: 100.0%) (WL:  0.34549) (D: 0.123) (M:  2.6) (Q:  0.34549) (V:  -.----) 
+bestmove e4d3 ponder e1d2

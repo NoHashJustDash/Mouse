@@ -1,0 +1,5 @@
+       _
+|   _ | |
+|_ |_ |_| v0.32.1 built Nov 23 2025
+Search algorithm: classic
+Creating backend [random]...

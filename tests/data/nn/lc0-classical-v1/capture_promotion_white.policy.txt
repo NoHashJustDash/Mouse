@@ -1,0 +1,22 @@
+info depth 1 seldepth 2 time 0 nodes 2 score cp 85 tbhits 0 pv a7b8q e8f7
+info depth 2 seldepth 3 time 0 nodes 3 score cp 71 tbhits 0 pv a7b8q e8f7 b8c7
+info depth 2 seldepth 4 time 0 nodes 4 score cp 69 tbhits 0 pv a7b8q e8f7 b8c7 f7e6
+info depth 3 seldepth 5 time 0 nodes 5 score cp 66 tbhits 0 pv a7b8q e8f7 b8c7 f7e6 c7b6
+info depth 3 seldepth 6 time 0 nodes 10 score cp 59 tbhits 0 pv a7b8q e8f7 b8c7 f7e6 c7b6 e6d5
+info depth 4 seldepth 6 time 1 nodes 30 score cp 41 tbhits 0 pv a7b8q e8f7 b8c7 f7g6 c7b6 g6f7
+info depth 4 seldepth 6 time 1 nodes 32 score cp 42 tbhits 0 pv a7b8q e8f7 b8c7 f7g6 c7b6 g6f7
+info string e1d2  (105 ) N:       0 (+ 0) (P:  2.53%) (WL:  -.-----) (D: -.---) (M:  -.-) (Q:  0.12806) (U: 0.24622) (S:  0.37428) (V:  -.----) 
+info string e1f1  (101 ) N:       0 (+ 0) (P:  2.53%) (WL:  -.-----) (D: -.---) (M:  -.-) (Q:  0.12806) (U: 0.24645) (S:  0.37450) (V:  -.----) 
+info string e1e2  (106 ) N:       0 (+ 0) (P:  2.71%) (WL:  -.-----) (D: -.---) (M:  -.-) (Q:  0.12806) (U: 0.26397) (S:  0.39203) (V:  -.----) 
+info string a7a8b (1794) N:       0 (+ 0) (P:  3.27%) (WL:  -.-----) (D: -.---) (M:  -.-) (Q:  0.12806) (U: 0.31855) (S:  0.44660) (V:  -.----) 
+info string e1d1  (100 ) N:       0 (+ 0) (P:  3.38%) (WL:  -.-----) (D: -.---) (M:  -.-) (Q:  0.12806) (U: 0.32924) (S:  0.45730) (V:  -.----) 
+info string a7a8r (1793) N:       0 (+ 0) (P:  4.88%) (WL:  -.-----) (D: -.---) (M:  -.-) (Q:  0.12806) (U: 0.47492) (S:  0.60298) (V:  -.----) 
+info string e1f2  (107 ) N:       0 (+ 0) (P:  6.69%) (WL:  -.-----) (D: -.---) (M:  -.-) (Q:  0.12806) (U: 0.65075) (S:  0.77881) (V:  -.----) 
+info string a7a8n (1401) N:       0 (+ 0) (P:  6.88%) (WL:  -.-----) (D: -.---) (M:  -.-) (Q:  0.12806) (U: 0.66947) (S:  0.79752) (V:  -.----) 
+info string a7b8n (1402) N:       0 (+ 0) (P:  7.89%) (WL:  -.-----) (D: -.---) (M:  -.-) (Q:  0.12806) (U: 0.76748) (S:  0.89554) (V:  -.----) 
+info string a7a8q (1792) N:       1 (+ 0) (P: 10.60%) (WL: -0.32582) (D: 0.000) (M:  0.0) (Q: -0.32582) (U: 0.51561) (S:  0.18979) (V:  -.----) 
+info string a7b8b (1797) N:       1 (+ 0) (P:  8.87%) (WL: -0.09432) (D: 0.000) (M:  0.0) (Q: -0.09432) (U: 0.43186) (S:  0.33754) (V:  -.----) 
+info string a7b8r (1796) N:       2 (+ 0) (P: 13.77%) (WL:  0.18260) (D: 0.000) (M:  0.5) (Q:  0.18260) (U: 0.44671) (S:  0.62930) (V:  -.----) 
+info string a7b8q (1795) N:      27 (+ 0) (P: 26.00%) (WL:  0.48437) (D: 0.000) (M:  2.4) (Q:  0.48437) (U: 0.09038) (S:  0.57475) (V:  -.----) 
+info string node  (  13) N:      32 (+ 0) (P: 59.24%) (WL:  0.38205) (D: 0.000) (M:  3.1) (Q:  0.38205) (V:  -.----) 
+bestmove a7b8q ponder e8f7

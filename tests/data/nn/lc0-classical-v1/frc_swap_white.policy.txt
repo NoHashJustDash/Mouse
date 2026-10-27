@@ -1,0 +1,22 @@
+info depth 1 seldepth 2 time 0 nodes 2 score cp 147 tbhits 0 pv f1g2 a8b7
+info depth 2 seldepth 3 time 0 nodes 3 score cp 130 tbhits 0 pv f1g2 a8b7 g2f2
+info depth 2 seldepth 4 time 0 nodes 4 score cp 120 tbhits 0 pv f1g2 a8b7 g2f2 b7c7
+info depth 2 seldepth 5 time 0 nodes 10 score cp 119 tbhits 0 pv f1g2 a8b7 g2f2 b7c7 f2e3
+info depth 3 seldepth 5 time 1 nodes 24 score cp 121 tbhits 0 pv f1g2 a8b7 g2f2 b7c7 f2e3
+info depth 3 seldepth 6 time 1 nodes 26 score cp 122 tbhits 0 pv f1g2 a8b7 g2f2 b7c7 f2e3 c7c6
+info depth 3 seldepth 6 time 1 nodes 32 score cp 121 nps 32000 tbhits 0 pv f1g2 a8b7 g2f2 b7c7 f2e3 c7c6
+info string g1h1  (153 ) N:       0 (+ 0) (P:  2.98%) (WL:  -.-----) (D: -.---) (M:  -.-) (Q:  0.49467) (U: 0.28988) (S:  0.78456) (V:  -.----) 
+info string g1g4  (163 ) N:       0 (+ 0) (P:  5.41%) (WL:  -.-----) (D: -.---) (M:  -.-) (Q:  0.49467) (U: 0.52675) (S:  1.02142) (V:  -.----) 
+info string g1g3  (160 ) N:       0 (+ 0) (P:  5.68%) (WL:  -.-----) (D: -.---) (M:  -.-) (Q:  0.49467) (U: 0.55289) (S:  1.04756) (V:  -.----) 
+info string g1g5  (165 ) N:       0 (+ 0) (P:  5.92%) (WL:  -.-----) (D: -.---) (M:  -.-) (Q:  0.49467) (U: 0.57635) (S:  1.07103) (V:  -.----) 
+info string f1e1  (126 ) N:       2 (+ 0) (P:  6.92%) (WL:  0.69461) (D: 0.000) (M:  0.5) (Q:  0.69461) (U: 0.22444) (S:  0.91905) (V:  -.----) 
+info string g1g6  (167 ) N:       2 (+ 0) (P:  5.95%) (WL:  0.79408) (D: 0.000) (M:  0.5) (Q:  0.79408) (U: 0.19301) (S:  0.98709) (V:  -.----) 
+info string f1g1  (127 ) N:       2 (+ 0) (P:  6.95%) (WL:  0.76206) (D: 0.000) (M:  0.5) (Q:  0.76206) (U: 0.22553) (S:  0.98759) (V:  -.----) 
+info string f1f2  (131 ) N:       2 (+ 0) (P:  7.31%) (WL:  0.76945) (D: 0.000) (M:  0.5) (Q:  0.76945) (U: 0.23702) (S:  1.00646) (V:  -.----) 
+info string g1g2  (156 ) N:       2 (+ 0) (P:  8.86%) (WL:  0.72775) (D: 0.000) (M:  0.5) (Q:  0.72775) (U: 0.28741) (S:  1.01516) (V:  -.----) 
+info string f1e2  (130 ) N:       3 (+ 0) (P: 10.36%) (WL:  0.75142) (D: 0.000) (M:  1.0) (Q:  0.75142) (U: 0.25216) (S:  1.00358) (V:  -.----) 
+info string g1g8  (170 ) N:       5 (+ 0) (P:  9.14%) (WL:  0.83674) (D: 0.000) (M:  1.8) (Q:  0.83674) (U: 0.14821) (S:  0.98495) (V:  -.----) 
+info string g1g7  (169 ) N:       5 (+ 0) (P:  7.88%) (WL:  0.87493) (D: 0.000) (M:  1.8) (Q:  0.87493) (U: 0.12776) (S:  1.00270) (V:  -.----) 
+info string f1g2  (132 ) N:       8 (+ 0) (P: 16.64%) (WL:  0.77616) (D: 0.000) (M:  1.9) (Q:  0.77616) (U: 0.17999) (S:  0.95615) (V:  -.----) 
+info string node  (  13) N:      32 (+ 0) (P: 80.01%) (WL:  0.78985) (D: 0.000) (M:  2.2) (Q:  0.78985) (V:  -.----) 
+bestmove f1g2 ponder a8b7

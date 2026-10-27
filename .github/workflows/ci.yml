@@ -1,0 +1,162 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+name: CI
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+env:
+  VCPKG_DEFAULT_BINARY_CACHE: ${{ github.workspace }}/.toolchain/vcpkg-binary-cache
+  VCPKG_BINARY_SOURCES: clear;default,readwrite
+jobs:
+  changes:
+    runs-on: ubuntu-24.04
+    outputs:
+      runtime: ${{ steps.scope.outputs.runtime }}
+      lint: ${{ steps.scope.outputs.lint }}
+      python: ${{ steps.scope.outputs.python }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
+      - name: Identify affected suites
+        id: scope
+        shell: bash
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          if [[ -z "$BASE_SHA" || "$BASE_SHA" =~ ^0+$ ]] || ! git cat-file -e "$BASE_SHA^{commit}"; then
+            git ls-files -z > "$RUNNER_TEMP/changed-paths"
+          else
+            git diff --name-only -z "$BASE_SHA" HEAD > "$RUNNER_TEMP/changed-paths"
+          fi
+          python .github/scripts/ci_scope.py "$RUNNER_TEMP/changed-paths" "$GITHUB_OUTPUT"
+
+  windows:
+    needs: changes
+    if: needs.changes.outputs.runtime == 'true'
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
+      - name: Create binary cache directory
+        shell: powershell
+        run: New-Item -ItemType Directory -Force -Path $env:VCPKG_DEFAULT_BINARY_CACHE | Out-Null
+      - name: Cache vcpkg binaries
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0; Node 24 on hosted runners
+        with:
+          path: ${{ env.VCPKG_DEFAULT_BINARY_CACHE }}
+          key: vcpkg-${{ runner.os }}-windows2022-msvc-release-a5f736224e85b32e25a8ffc52562333180396642-${{ hashFiles('vcpkg.json') }}
+      - name: Cache pinned Windows ONNX Runtime
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0; Node 24 on hosted runners
+        with:
+          path: |
+            .toolchain/downloads/onnxruntime-win-x64-gpu-1.22.0.zip
+            .toolchain/sdks/onnxruntime/onnxruntime-win-x64-gpu-1.22.0
+          key: ort-${{ runner.os }}-gpu-1.22.0-5b5241716b2628c1ab5e79ee620be767531021149ee68f30fc46c16263fb94dd
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: '3.12'
+      - name: Build and CPU tests, including exported source
+        shell: powershell
+        run: ./scripts/build.ps1 -SkipPython
+
+  linux:
+    needs: changes
+    if: needs.changes.outputs.runtime == 'true'
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        preset: [linux-gcc-release, linux-clang-release, linux-clang-asan, linux-clang-tsan]
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
+      - name: Create binary cache directory
+        run: mkdir -p "$VCPKG_DEFAULT_BINARY_CACHE"
+      - name: Cache vcpkg binaries
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0; Node 24 on hosted runners
+        with:
+          path: ${{ env.VCPKG_DEFAULT_BINARY_CACHE }}
+          key: vcpkg-${{ runner.os }}-ubuntu24.04-${{ matrix.preset }}-a5f736224e85b32e25a8ffc52562333180396642-${{ hashFiles('vcpkg.json') }}
+      - name: Install compiler prerequisites
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y g++-13 libstdc++-13-dev clang-19 clang-tools-19 libclang-rt-19-dev ninja-build cmake curl zip unzip tar pkg-config
+      - name: Configure TSan address space
+        if: matrix.preset == 'linux-clang-tsan'
+        run: sudo sysctl vm.mmap_rnd_bits=28
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: '3.12'
+      - name: Bootstrap pinned dependencies
+        run: bash scripts/bootstrap-linux.sh
+      - name: Configure
+        run: cmake --preset ${{ matrix.preset }}
+      - name: Build
+        run: cmake --build --preset ${{ matrix.preset }}
+      - name: CPU tests, including exported source
+        run: ctest --preset ${{ matrix.preset }}
+
+  lint:
+    needs: changes
+    if: needs.changes.outputs.lint == 'true'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
+      - name: Create binary cache directory
+        run: mkdir -p "$VCPKG_DEFAULT_BINARY_CACHE"
+      - name: Cache vcpkg binaries
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0; Node 24 on hosted runners
+        with:
+          path: ${{ env.VCPKG_DEFAULT_BINARY_CACHE }}
+          key: vcpkg-${{ runner.os }}-ubuntu24.04-linux-clang-lint-a5f736224e85b32e25a8ffc52562333180396642-${{ hashFiles('vcpkg.json') }}
+      - name: Install compiler and lint prerequisites
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y g++-13 libstdc++-13-dev clang-19 clang-tools-19 clang-tidy-19 clang-format-19 ninja-build cmake curl zip unzip tar pkg-config
+      - name: Format Phase 1 C++
+        run: git ls-files -z -- 'engine/*.h' 'engine/*.cpp' 'tests/*.h' 'tests/*.cpp' | xargs -0 -r clang-format-19 --dry-run --Werror
+      - name: Bootstrap pinned dependencies
+        run: bash scripts/bootstrap-linux.sh
+      - name: Configure lint
+        run: cmake --preset linux-clang-lint
+      - name: Compile with clang-tidy
+        run: cmake --build --preset linux-clang-lint -- -k 0
+
+  python:
+    needs: changes
+    if: needs.changes.outputs.python == 'true'
+    name: Python (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            lock: tools/requirements-converter-linux-cpu.lock
+          - os: windows-2022
+            lock: tools/requirements-converter-windows-cpu.lock
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: '3.12'
+      - name: Install hash-locked development dependencies
+        run: |
+          python -I -m pip install --only-binary=:all: --require-hashes -r ${{ matrix.lock }}
+          python -I -m pip install --no-build-isolation --no-deps ./tools
+          python -I -m pip check
+      - name: Test
+        run: python -I -m pytest tools
+      - name: Ruff
+        run: python -I -m ruff check tools
+      - name: Strict type check
+        run: python -I -m mypy --strict --config-file tools/pyproject.toml tools

@@ -1,0 +1,845 @@
+{
+  "schema": 1,
+  "cases": [
+    {
+      "name": "recorded",
+      "q": -0.5752400159835815,
+      "d": 0.2798318862915039,
+      "q_bits": "ee4213bf",
+      "d_bits": "20468f3e",
+      "expected": {
+        "cp": -163,
+        "wdl": [
+          72,
+          279,
+          649
+        ],
+        "branch": "mu",
+        "rescaled": true,
+        "reported_q": -0.5771080255508423,
+        "reported_d": 0.27876853942871094,
+        "mu": -1.6319993734359741,
+        "score_float": -163.19993591308594
+      },
+      "observed": {
+        "cp": -163,
+        "wdl": [
+          72,
+          279,
+          649
+        ]
+      },
+      "equations_match": true
+    },
+    {
+      "name": "zero",
+      "q": 0.0,
+      "d": 0.0,
+      "q_bits": "00000000",
+      "d_bits": "00000000",
+      "expected": {
+        "cp": 0,
+        "wdl": [
+          500,
+          0,
+          500
+        ],
+        "branch": "fallback",
+        "rescaled": false,
+        "reported_q": 0.0,
+        "reported_d": 0.0,
+        "mu": 0.0,
+        "score_float": 0.0
+      },
+      "observed": {
+        "cp": 0,
+        "wdl": [
+          500,
+          0,
+          500
+        ]
+      },
+      "equations_match": true
+    },
+    {
+      "name": "draw",
+      "q": 0.0,
+      "d": 1.0,
+      "q_bits": "00000000",
+      "d_bits": "0000803f",
+      "expected": {
+        "cp": 0,
+        "wdl": [
+          0,
+          1000,
+          0
+        ],
+        "branch": "fallback",
+        "rescaled": false,
+        "reported_q": 0.0,
+        "reported_d": 1.0,
+        "mu": 0.0,
+        "score_float": 0.0
+      },
+      "observed": {
+        "cp": 0,
+        "wdl": [
+          0,
+          1000,
+          0
+        ]
+      },
+      "equations_match": true
+    },
+    {
+      "name": "half_pos",
+      "q": 0.5,
+      "d": 0.0,
+      "q_bits": "0000003f",
+      "d_bits": "00000000",
+      "expected": {
+        "cp": 44,
+        "wdl": [
+          750,
+          0,
+          250
+        ],
+        "branch": "fallback",
+        "rescaled": false,
+        "reported_q": 0.5,
+        "reported_d": 0.0,
+        "mu": 0.0,
+        "score_float": 44.84207534790039
+      },
+      "observed": {
+        "cp": 44,
+        "wdl": [
+          750,
+          0,
+          250
+        ]
+      },
+      "equations_match": true
+    },
+    {
+      "name": "half_neg",
+      "q": -0.5,
+      "d": 0.0,
+      "q_bits": "000000bf",
+      "d_bits": "00000000",
+      "expected": {
+        "cp": -44,
+        "wdl": [
+          250,
+          0,
+          750
+        ],
+        "branch": "fallback",
+        "rescaled": false,
+        "reported_q": -0.5,
+        "reported_d": 0.0,
+        "mu": 0.0,
+        "score_float": -44.84207534790039
+      },
+      "observed": {
+        "cp": -44,
+        "wdl": [
+          250,
+          0,
+          750
+        ]
+      },
+      "equations_match": true
+    },
+    {
+      "name": "endpoint_win",
+      "q": 1.0,
+      "d": 0.0,
+      "q_bits": "0000803f",
+      "d_bits": "00000000",
+      "expected": {
+        "cp": 12800,
+        "wdl": [
+          1000,
+          0,
+          0
+        ],
+        "branch": "fallback",
+        "rescaled": false,
+        "reported_q": 1.0,
+        "reported_d": 0.0,
+        "mu": 0.0,
+        "score_float": 12800.0
+      },
+      "observed": {
+        "cp": 12800,
+        "wdl": [
+          1000,
+          0,
+          0
+        ]
+      },
+      "equations_match": true
+    },
+    {
+      "name": "endpoint_loss",
+      "q": -1.0,
+      "d": 0.0,
+      "q_bits": "000080bf",
+      "d_bits": "00000000",
+      "expected": {
+        "cp": -12800,
+        "wdl": [
+          0,
+          0,
+          1000
+        ],
+        "branch": "fallback",
+        "rescaled": false,
+        "reported_q": -1.0,
+        "reported_d": 0.0,
+        "mu": 0.0,
+        "score_float": -12800.0
+      },
+      "observed": {
+        "cp": -12800,
+        "wdl": [
+          0,
+          0,
+          1000
+        ]
+      },
+      "equations_match": true
+    },
+    {
+      "name": "tie_pos",
+      "q": 0.125,
+      "d": 0.0,
+      "q_bits": "0000003e",
+      "d_bits": "00000000",
+      "expected": {
+        "cp": 8,
+        "wdl": [
+          563,
+          0,
+          437
+        ],
+        "branch": "fallback",
+        "rescaled": false,
+        "reported_q": 0.125,
+        "reported_d": 0.0,
+        "mu": 0.0,
+        "score_float": 8.930500984191895
+      },
+      "observed": {
+        "cp": 8,
+        "wdl": [
+          563,
+          0,
+          437
+        ]
+      },
+      "equations_match": true
+    },
+    {
+      "name": "tie_neg",
+      "q": -0.125,
+      "d": 0.0,
+      "q_bits": "000000be",
+      "d_bits": "00000000",
+      "expected": {
+        "cp": -8,
+        "wdl": [
+          438,
+          0,
+          562
+        ],
+        "branch": "fallback",
+        "rescaled": false,
+        "reported_q": -0.125,
+        "reported_d": 0.0,
+        "mu": 0.0,
+        "score_float": -8.930500984191895
+      },
+      "observed": {
+        "cp": -8,
+        "wdl": [
+          438,
+          0,
+          562
+        ]
+      },
+      "equations_match": true
+    },
+    {
+      "name": "trunc_pos",
+      "q": 0.03999999910593033,
+      "d": 0.0,
+      "q_bits": "0ad7233d",
+      "d_bits": "00000000",
+      "expected": {
+        "cp": 2,
+        "wdl": [
+          520,
+          0,
+          480
+        ],
+        "branch": "fallback",
+        "rescaled": false,
+        "reported_q": 0.03999999910593033,
+        "reported_d": 0.0,
+        "mu": 0.0,
+        "score_float": 2.8248069286346436
+      },
+      "observed": {
+        "cp": 2,
+        "wdl": [
+          520,
+          0,
+          480
+        ]
+      },
+      "equations_match": true
+    },
+    {
+      "name": "trunc_neg",
+      "q": -0.03999999910593033,
+      "d": 0.0,
+      "q_bits": "0ad723bd",
+      "d_bits": "00000000",
+      "expected": {
+        "cp": -2,
+        "wdl": [
+          480,
+          0,
+          520
+        ],
+        "branch": "fallback",
+        "rescaled": false,
+        "reported_q": -0.03999999910593033,
+        "reported_d": 0.0,
+        "mu": 0.0,
+        "score_float": -2.8248069286346436
+      },
+      "observed": {
+        "cp": -2,
+        "wdl": [
+          480,
+          0,
+          520
+        ]
+      },
+      "equations_match": true
+    },
+    {
+      "name": "mu_pos",
+      "q": 0.30000001192092896,
+      "d": 0.4000000059604645,
+      "q_bits": "9a99993e",
+      "d_bits": "cdcccc3e",
+      "expected": {
+        "cp": 79,
+        "wdl": [
+          452,
+          398,
+          150
+        ],
+        "branch": "mu",
+        "rescaled": true,
+        "reported_q": 0.30174878239631653,
+        "reported_d": 0.3981238007545471,
+        "mu": 0.797256350517273,
+        "score_float": 79.72563171386719
+      },
+      "observed": {
+        "cp": 79,
+        "wdl": [
+          452,
+          398,
+          150
+        ]
+      },
+      "equations_match": true
+    },
+    {
+      "name": "mu_neg",
+      "q": -0.30000001192092896,
+      "d": 0.4000000059604645,
+      "q_bits": "9a9999be",
+      "d_bits": "cdcccc3e",
+      "expected": {
+        "cp": -79,
+        "wdl": [
+          150,
+          398,
+          452
+        ],
+        "branch": "mu",
+        "rescaled": true,
+        "reported_q": -0.30174878239631653,
+        "reported_d": 0.3981238305568695,
+        "mu": -0.797256350517273,
+        "score_float": -79.72563171386719
+      },
+      "observed": {
+        "cp": -79,
+        "wdl": [
+          150,
+          398,
+          452
+        ]
+      },
+      "equations_match": true
+    },
+    {
+      "name": "mu_large_pos",
+      "q": 0.5,
+      "d": 0.30000001192092896,
+      "q_bits": "0000003f",
+      "d_bits": "9a99993e",
+      "expected": {
+        "cp": 145,
+        "wdl": [
+          601,
+          298,
+          101
+        ],
+        "branch": "mu",
+        "rescaled": true,
+        "reported_q": 0.5002579689025879,
+        "reported_d": 0.2983841896057129,
+        "mu": 1.45829439163208,
+        "score_float": 145.82943725585938
+      },
+      "observed": {
+        "cp": 145,
+        "wdl": [
+          601,
+          298,
+          101
+        ]
+      },
+      "equations_match": true
+    },
+    {
+      "name": "mu_large_neg",
+      "q": -0.5,
+      "d": 0.30000001192092896,
+      "q_bits": "000000bf",
+      "d_bits": "9a99993e",
+      "expected": {
+        "cp": -145,
+        "wdl": [
+          101,
+          298,
+          601
+        ],
+        "branch": "mu",
+        "rescaled": true,
+        "reported_q": -0.5002579689025879,
+        "reported_d": 0.2983841896057129,
+        "mu": -1.45829439163208,
+        "score_float": -145.82943725585938
+      },
+      "observed": {
+        "cp": -145,
+        "wdl": [
+          101,
+          298,
+          601
+        ]
+      },
+      "equations_match": true
+    },
+    {
+      "name": "mu_zero",
+      "q": 0.0,
+      "d": 0.5,
+      "q_bits": "00000000",
+      "d_bits": "0000003f",
+      "expected": {
+        "cp": 0,
+        "wdl": [
+          249,
+          502,
+          249
+        ],
+        "branch": "fallback",
+        "rescaled": true,
+        "reported_q": 0.0,
+        "reported_d": 0.5010597705841064,
+        "mu": 0.0,
+        "score_float": 0.0
+      },
+      "observed": {
+        "cp": 0,
+        "wdl": [
+          249,
+          502,
+          249
+        ]
+      },
+      "equations_match": true
+    },
+    {
+      "name": "mu_high_q",
+      "q": 0.8999999761581421,
+      "d": 0.05000000074505806,
+      "q_bits": "6666663f",
+      "d_bits": "cdcc4c3d",
+      "expected": {
+        "cp": 540,
+        "wdl": [
+          925,
+          50,
+          25
+        ],
+        "branch": "mu",
+        "rescaled": true,
+        "reported_q": 0.9001816511154175,
+        "reported_d": 0.04945709556341171,
+        "mu": 5.406576633453369,
+        "score_float": 540.6576538085938
+      },
+      "observed": {
+        "cp": 540,
+        "wdl": [
+          925,
+          50,
+          25
+        ]
+      },
+      "equations_match": true
+    },
+    {
+      "name": "near_switch",
+      "q": 0.9900000095367432,
+      "d": 0.004999999888241291,
+      "q_bits": "a4707d3f",
+      "d_bits": "0ad7a33b",
+      "expected": {
+        "cp": 2342,
+        "wdl": [
+          992,
+          6,
+          2
+        ],
+        "branch": "fallback",
+        "rescaled": true,
+        "reported_q": 0.9899857640266418,
+        "reported_d": 0.005038310308009386,
+        "mu": 9.806660652160645,
+        "score_float": 2342.15283203125
+      },
+      "observed": {
+        "cp": 2342,
+        "wdl": [
+          992,
+          6,
+          2
+        ]
+      },
+      "equations_match": true
+    },
+    {
+      "name": "near_switch2",
+      "q": 0.9900000095367432,
+      "d": 0.004000000189989805,
+      "q_bits": "a4707d3f",
+      "d_bits": "6f12833b",
+      "expected": {
+        "cp": 2332,
+        "wdl": [
+          993,
+          4,
+          3
+        ],
+        "branch": "fallback",
+        "rescaled": true,
+        "reported_q": 0.9899329543113708,
+        "reported_d": 0.004035872407257557,
+        "mu": 12.612980842590332,
+        "score_float": 2332.102783203125
+      },
+      "observed": {
+        "cp": 2332,
+        "wdl": [
+          993,
+          4,
+          3
+        ]
+      },
+      "equations_match": true
+    },
+    {
+      "name": "eps_draw_equal",
+      "q": 0.9900000095367432,
+      "d": 9.999999747378752e-05,
+      "q_bits": "a4707d3f",
+      "d_bits": "17b7d138",
+      "expected": {
+        "cp": 2344,
+        "wdl": [
+          995,
+          0,
+          5
+        ],
+        "branch": "fallback",
+        "rescaled": false,
+        "reported_q": 0.9900000095367432,
+        "reported_d": 9.999999747378752e-05,
+        "mu": 0.0,
+        "score_float": 2344.878662109375
+      },
+      "observed": {
+        "cp": 2344,
+        "wdl": [
+          995,
+          0,
+          5
+        ]
+      },
+      "equations_match": true
+    },
+    {
+      "name": "eps_draw_above",
+      "q": 0.9900000095367432,
+      "d": 0.00010000000474974513,
+      "q_bits": "a4707d3f",
+      "d_bits": "18b7d138",
+      "expected": {
+        "cp": 55660,
+        "wdl": [
+          995,
+          0,
+          5
+        ],
+        "branch": "mu",
+        "rescaled": true,
+        "reported_q": 0.9900513291358948,
+        "reported_d": 9.971670806407928e-05,
+        "mu": 556.6058349609375,
+        "score_float": 55660.58203125
+      },
+      "observed": {
+        "cp": 55660,
+        "wdl": [
+          995,
+          0,
+          5
+        ]
+      },
+      "equations_match": true
+    },
+    {
+      "name": "near_draw",
+      "q": 0.0,
+      "d": 0.9998000264167786,
+      "q_bits": "00000000",
+      "d_bits": "e5f27f3f",
+      "expected": {
+        "cp": 0,
+        "wdl": [
+          0,
+          1000,
+          0
+        ],
+        "branch": "fallback",
+        "rescaled": false,
+        "reported_q": 0.0,
+        "reported_d": 0.9998000264167786,
+        "mu": 0.0,
+        "score_float": 0.0
+      },
+      "observed": {
+        "cp": 0,
+        "wdl": [
+          0,
+          1000,
+          0
+        ]
+      },
+      "equations_match": true
+    },
+    {
+      "name": "narrow_win",
+      "q": 0.9998000264167786,
+      "d": 0.00011000000085914508,
+      "q_bits": "e5f27f3f",
+      "d_bits": "cdafe638",
+      "expected": {
+        "cp": 11752,
+        "wdl": [
+          1000,
+          0,
+          0
+        ],
+        "branch": "fallback",
+        "rescaled": false,
+        "reported_q": 0.9998000264167786,
+        "reported_d": 0.00011000000085914508,
+        "mu": 0.0,
+        "score_float": 11752.28125
+      },
+      "observed": {
+        "cp": 11752,
+        "wdl": [
+          1000,
+          0,
+          0
+        ]
+      },
+      "equations_match": true
+    },
+    {
+      "name": "threshold_below_far",
+      "q": 0.10000000149011612,
+      "d": 0.8955000042915344,
+      "q_bits": "cdcccc3d",
+      "d_bits": "7d3f653f",
+      "expected": {
+        "cp": 47,
+        "wdl": [
+          103,
+          895,
+          2
+        ],
+        "branch": "mu",
+        "rescaled": true,
+        "reported_q": 0.10064278542995453,
+        "reported_d": 0.8948922753334045,
+        "mu": 0.4755290746688843,
+        "score_float": 47.55290603637695
+      },
+      "observed": {
+        "cp": 47,
+        "wdl": [
+          103,
+          895,
+          2
+        ]
+      },
+      "equations_match": true
+    },
+    {
+      "name": "threshold_below",
+      "q": 0.10000000149011612,
+      "d": 0.8959000110626221,
+      "q_bits": "cdcccc3d",
+      "d_bits": "b459653f",
+      "expected": {
+        "cp": 48,
+        "wdl": [
+          103,
+          895,
+          2
+        ],
+        "branch": "mu",
+        "rescaled": true,
+        "reported_q": 0.10064128786325455,
+        "reported_d": 0.8952786922454834,
+        "mu": 0.4809005856513977,
+        "score_float": 48.090057373046875
+      },
+      "observed": {
+        "cp": 48,
+        "wdl": [
+          103,
+          895,
+          2
+        ]
+      },
+      "equations_match": true
+    },
+    {
+      "name": "threshold_boundary",
+      "q": 0.10000000149011612,
+      "d": 0.8960000276565552,
+      "q_bits": "cdcccc3d",
+      "d_bits": "4260653f",
+      "expected": {
+        "cp": 7,
+        "wdl": [
+          103,
+          895,
+          2
+        ],
+        "branch": "fallback",
+        "rescaled": true,
+        "reported_q": 0.10063878446817398,
+        "reported_d": 0.8953725695610046,
+        "mu": 0.4822489619255066,
+        "score_float": 7.157268047332764
+      },
+      "observed": {
+        "cp": 7,
+        "wdl": [
+          103,
+          895,
+          2
+        ]
+      },
+      "equations_match": true
+    },
+    {
+      "name": "threshold_above",
+      "q": 0.10000000149011612,
+      "d": 0.8960999846458435,
+      "q_bits": "cdcccc3d",
+      "d_bits": "cf66653f",
+      "expected": {
+        "cp": 7,
+        "wdl": [
+          103,
+          895,
+          2
+        ],
+        "branch": "fallback",
+        "rescaled": true,
+        "reported_q": 0.10063447803258896,
+        "reported_d": 0.8954657316207886,
+        "mu": 0.48358866572380066,
+        "score_float": 7.156956672668457
+      },
+      "observed": {
+        "cp": 7,
+        "wdl": [
+          103,
+          895,
+          2
+        ]
+      },
+      "equations_match": true
+    },
+    {
+      "name": "threshold_above_far",
+      "q": 0.10000000149011612,
+      "d": 0.8964999914169312,
+      "q_bits": "cdcccc3d",
+      "d_bits": "0681653f",
+      "expected": {
+        "cp": 7,
+        "wdl": [
+          102,
+          896,
+          2
+        ],
+        "branch": "fallback",
+        "rescaled": true,
+        "reported_q": 0.10062751919031143,
+        "reported_d": 0.895846962928772,
+        "mu": 0.4895068407058716,
+        "score_float": 7.1564531326293945
+      },
+      "observed": {
+        "cp": 7,
+        "wdl": [
+          102,
+          896,
+          2
+        ]
+      },
+      "equations_match": true
+    }
+  ]
+}

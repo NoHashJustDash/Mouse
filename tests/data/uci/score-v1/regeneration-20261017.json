@@ -1,0 +1,17 @@
+{
+  "schema": 1,
+  "status": "passed",
+  "sessions": 72,
+  "exact_cases": 28,
+  "repeats_per_case": 2,
+  "gpu_executions": 0,
+  "lc0_sha256": "e32164ceb85ab128e6fe5e02d34cf17608d638335ae7d519f82a58c372e9666b",
+  "command": "python -I -B tests/data/uci/score-v1/reference.py regenerate --lc0 <workspace>/.toolchain/reference/lc0/lc0.exe --output .toolchain/score/regenerated-final",
+  "original_manifest_sha256": "12e61ba1e2999d276103a95b8d9dfb78389b4609f70517fd8e50ca39c09b0b28",
+  "source_commit": "fd71a2d921b689c5f479d3227c3806c8e272d9c5",
+  "maintained_files": {
+    "cases.inc": "6f40aba98c5c0935edec40d5ef92ecfb9f165bc37e42cf213829880d072c59de",
+    "reference.py": "053335984f8eb4a2065b2ec2ed31c71015a3f7dc438dbe82cea59b8b2ca8b468",
+    "test_reference.py": "34f3433e211d671b1bc644f13a51d6a011a2db72c6532eeb5eba43e2160a6e45"
+  }
+}

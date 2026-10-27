@@ -1,0 +1,14 @@
+[
+  "<workspace>\\.toolchain\\reference\\lc0\\lc0.exe",
+  "--config=",
+  "--backend=recordreplay",
+  "--backend-opts=backend=random,random(seed=0),replay_file='<workspace>/.worktrees/search/.toolchain/uci-score-research/near_switch.replay.bin'",
+  "--weights=",
+  "--threads=1",
+  "--minibatch-size=1",
+  "--max-prefetch=0",
+  "--nncache=0",
+  "--task-workers=0",
+  "--show-wdl",
+  "--verbose-move-stats"
+]

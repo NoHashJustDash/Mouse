@@ -1,0 +1,86 @@
+{
+  "schema": 1,
+  "controls": [
+    {
+      "name": "mu_explicit",
+      "score_type": "WDL_mu",
+      "observed": {
+        "cp": 79,
+        "wdl": [
+          452,
+          398,
+          150
+        ]
+      }
+    },
+    {
+      "name": "old_centipawn",
+      "score_type": "centipawn",
+      "observed": {
+        "cp": 45,
+        "wdl": [
+          450,
+          400,
+          150
+        ]
+      }
+    },
+    {
+      "name": "raw_wl",
+      "score_type": "W-L",
+      "observed": {
+        "cp": 3000,
+        "wdl": [
+          450,
+          400,
+          150
+        ]
+      }
+    },
+    {
+      "name": "half_old",
+      "score_type": "centipawn",
+      "observed": {
+        "cp": 89,
+        "wdl": [
+          750,
+          0,
+          250
+        ]
+      }
+    },
+    {
+      "name": "mate_white",
+      "fen": "7k/5K2/6Q1/8/8/8/8/8 w - - 0 1",
+      "go": "go nodes 2 searchmoves g6g7",
+      "score_pv": [
+        " score mate 1 wdl 1000 0 0 tbhits 0 pv g6g7"
+      ],
+      "bestmove": "bestmove g6g7"
+    },
+    {
+      "name": "mate_black",
+      "fen": "8/8/8/8/8/6q1/5k2/7K b - - 0 1",
+      "go": "go nodes 2 searchmoves g3g2",
+      "score_pv": [
+        " score mate 1 wdl 1000 0 0 tbhits 0 pv g3g2"
+      ],
+      "bestmove": "bestmove g3g2"
+    },
+    {
+      "name": "trivial_start",
+      "fen": "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
+      "go": "go nodes 1",
+      "score_pv": [
+        " score cp 0 wdl 500 0 500 tbhits 0 pv g1f3"
+      ],
+      "bestmove": "bestmove g1f3"
+    },
+    {
+      "name": "default_show_wdl_false",
+      "info": [
+        "info depth 1 seldepth 1 time 0 nodes 1 score cp 79 tbhits 0 pv h2h4"
+      ]
+    }
+  ]
+}
