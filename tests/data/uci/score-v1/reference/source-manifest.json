@@ -1,0 +1,59 @@
+{
+  "commit": "fd71a2d921b689c5f479d3227c3806c8e272d9c5",
+  "files": [
+    {
+      "path": "src/search/classic/search.cc",
+      "url": "https://raw.githubusercontent.com/LeelaChessZero/lc0/fd71a2d921b689c5f479d3227c3806c8e272d9c5/src/search/classic/search.cc",
+      "sha256": "532de4fd114f8ff140ef54732898d9d831ef14c7e0dd671867ae6d3b5501adc6",
+      "bytes": 91050
+    },
+    {
+      "path": "src/search/classic/params.cc",
+      "url": "https://raw.githubusercontent.com/LeelaChessZero/lc0/fd71a2d921b689c5f479d3227c3806c8e272d9c5/src/search/classic/params.cc",
+      "sha256": "680db07de8b363dd26f5c8805196eef11eb1619d9fce69898f52dc01947f5cdf",
+      "bytes": 38726
+    },
+    {
+      "path": "src/search/classic/params.h",
+      "url": "https://raw.githubusercontent.com/LeelaChessZero/lc0/fd71a2d921b689c5f479d3227c3806c8e272d9c5/src/search/classic/params.h",
+      "sha256": "05f01c7bbf68e387c31209545c3d799a924220189757796ae25c875e7980a964",
+      "bytes": 12163
+    },
+    {
+      "path": "src/chess/callbacks.h",
+      "url": "https://raw.githubusercontent.com/LeelaChessZero/lc0/fd71a2d921b689c5f479d3227c3806c8e272d9c5/src/chess/callbacks.h",
+      "sha256": "b5739e8e8b08da32e59338f237f1ff235080a37cfec737dd0d280f7740f3e49a",
+      "bytes": 7344
+    },
+    {
+      "path": "src/chess/uciloop.cc",
+      "url": "https://raw.githubusercontent.com/LeelaChessZero/lc0/fd71a2d921b689c5f479d3227c3806c8e272d9c5/src/chess/uciloop.cc",
+      "sha256": "b0b7a29fd9e9521216392d56957c41c457c3c339a784eacccf46b2004f801c3e",
+      "bytes": 11919
+    },
+    {
+      "path": "src/utils/fastmath.h",
+      "url": "https://raw.githubusercontent.com/LeelaChessZero/lc0/fd71a2d921b689c5f479d3227c3806c8e272d9c5/src/utils/fastmath.h",
+      "sha256": "73052fb720e8983fa5a9a630c7dce801201268ac2cfb360f90c1a2bbe0b30281",
+      "bytes": 4030
+    },
+    {
+      "path": "src/neural/backends/network_trivial.cc",
+      "url": "https://raw.githubusercontent.com/LeelaChessZero/lc0/fd71a2d921b689c5f479d3227c3806c8e272d9c5/src/neural/backends/network_trivial.cc",
+      "sha256": "7f40ed4d4cfd4fa00602e4804a73dd0349bdd823f80315348c6407de41c961d5",
+      "bytes": 31727
+    },
+    {
+      "path": "src/neural/backends/network_random.cc",
+      "url": "https://raw.githubusercontent.com/LeelaChessZero/lc0/fd71a2d921b689c5f479d3227c3806c8e272d9c5/src/neural/backends/network_random.cc",
+      "sha256": "900aba5be7ca3abe58732da6c5271fa3a1c228a5587db49b03dc3a422cea034c",
+      "bytes": 4961
+    },
+    {
+      "path": "src/neural/backends/network_record.cc",
+      "url": "https://raw.githubusercontent.com/LeelaChessZero/lc0/fd71a2d921b689c5f479d3227c3806c8e272d9c5/src/neural/backends/network_record.cc",
+      "sha256": "08994b028cead93e78a3a4c7f24d6060879e7373b4348bc4b2bda6eb4555bb88",
+      "bytes": 9070
+    }
+  ]
+}

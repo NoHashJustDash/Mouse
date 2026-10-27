@@ -1,0 +1,14 @@
+[
+  "<workspace>\\.toolchain\\reference\\lc0\\lc0.exe",
+  "--config=",
+  "--backend=trivial",
+  "--backend-opts=",
+  "--weights=",
+  "--threads=1",
+  "--minibatch-size=1",
+  "--max-prefetch=0",
+  "--nncache=0",
+  "--task-workers=0",
+  "--verbose-move-stats",
+  "--show-wdl"
+]

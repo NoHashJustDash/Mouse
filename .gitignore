@@ -1,0 +1,15 @@
+.toolchain/
+.venv/
+.superpowers/
+.worktrees/
+build/
+nets/
+dist/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+CMakeUserPresets.json
+vcpkg_installed/

@@ -1,0 +1,17 @@
+{
+  "schema": 1,
+  "status": "passed",
+  "exact_qd_cases": 28,
+  "repeated_per_case": 2,
+  "official_cpu_search_sessions": 72,
+  "all_exit_zero": true,
+  "backend_allowlist": [
+    "recordreplay",
+    "trivial"
+  ],
+  "explicit_cpu_recordreplay_children": true,
+  "equations_match_all_cp_and_integer_wdl": true,
+  "official_executable_sha256": "e32164ceb85ab128e6fe5e02d34cf17608d638335ae7d519f82a58c372e9666b",
+  "product_source_edits": false,
+  "gpu_backend_executions": 0
+}

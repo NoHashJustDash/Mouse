@@ -1,0 +1,147 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Independent deterministic search for multiply-and-shift occupancy hashes.
+// Algorithm reference: official-stockfish/Stockfish, sf_17.1, src/bitboard.cpp.
+// No reference implementation code, seeds or magic constants are copied.
+#include <array>
+#include <bit>
+#include <cstddef>
+#include <cstdint>
+#include <cstdio>
+#include <iomanip>
+#include <iostream>
+#include <stdexcept>
+#include <string_view>
+#include <vector>
+
+namespace {
+using Board = std::uint64_t;
+constexpr Board kSeed = 0x4d6f7573654d6167ULL;
+constexpr std::uint64_t kMaximumCandidates = 1000000000ULL;
+
+class Random {
+   public:
+    explicit Random(Board seed) : state_(seed) {}
+    Board next() {
+        state_ += 0x9e3779b97f4a7c15ULL;
+        auto mixed = state_;
+        mixed = (mixed ^ (mixed >> 30U)) * 0xbf58476d1ce4e5b9ULL;
+        mixed = (mixed ^ (mixed >> 27U)) * 0x94d049bb133111ebULL;
+        return mixed ^ (mixed >> 31U);
+    }
+
+   private:
+    Board state_;
+};
+
+bool inside(int file, int rank) { return file >= 0 && file < 8 && rank >= 0 && rank < 8; }
+
+Board walk(int square, bool diagonal, Board occupied, bool exclude_endpoints) {
+    Board result = 0;
+    for (int file_step = -1; file_step <= 1; ++file_step) {
+        for (int rank_step = -1; rank_step <= 1; ++rank_step) {
+            if ((file_step == 0 && rank_step == 0) ||
+                (diagonal ? file_step == 0 || rank_step == 0 : file_step != 0 && rank_step != 0)) {
+                continue;
+            }
+            auto file = square % 8 + file_step;
+            auto rank = square / 8 + rank_step;
+            while (inside(file, rank)) {
+                if (exclude_endpoints && !inside(file + file_step, rank + rank_step)) {
+                    break;
+                }
+                const Board destination = Board{1} << (rank * 8 + file);
+                result |= destination;
+                if ((occupied & destination) != 0) {
+                    break;
+                }
+                file += file_step;
+                rank += rank_step;
+            }
+        }
+    }
+    return result;
+}
+
+Board find_magic(int square, bool diagonal) {
+    const auto mask = walk(square, diagonal, 0, true);
+    const auto shift = 64 - std::popcount(mask);
+    const auto count = std::size_t{1} << std::popcount(mask);
+    std::vector<Board> occupancies;
+    std::vector<Board> attacks;
+    occupancies.reserve(count);
+    attacks.reserve(count);
+    Board subset = 0;
+    for (std::size_t entry = 0; entry < count; ++entry) {
+        occupancies.push_back(subset);
+        attacks.push_back(walk(square, diagonal, subset, false));
+        subset = (subset - mask) & mask;
+    }
+    std::vector<Board> values(count);
+    std::vector<std::uint64_t> epochs(count);
+    Random random{kSeed ^ (0x9e3779b97f4a7c15ULL * static_cast<Board>(square + 1)) ^
+                  (diagonal ? 0x426973686f70ULL : 0x526f6f6bULL)};
+    for (std::uint64_t attempt = 1; attempt <= kMaximumCandidates; ++attempt) {
+        const Board multiplier = random.next() & random.next() & random.next();
+        if (std::popcount((mask * multiplier) >> 56U) < 6) {
+            continue;
+        }
+        bool collision = false;
+        for (std::size_t index = 0; index < count; ++index) {
+            const auto slot = static_cast<std::size_t>((occupancies[index] * multiplier) >> shift);
+            if (epochs[slot] == attempt && values[slot] != attacks[index]) {
+                collision = true;
+                break;
+            }
+            values[slot] = attacks[index];
+            epochs[slot] = attempt;
+        }
+        if (!collision) {
+            std::cerr << (diagonal ? "bishop " : "rook ") << square << " candidates=" << attempt
+                      << '\n';
+            return multiplier;
+        }
+    }
+    throw std::runtime_error("Magic search exhausted its deterministic candidate limit.");
+}
+
+void print_array(std::string_view name, const std::array<Board, 64>& values) {
+    std::cout << "inline constexpr std::array<std::uint64_t, 64> " << name << "{{\n";
+    for (std::size_t index = 0; index < values.size(); ++index) {
+        if (index % 4 == 0) {
+            std::cout << "    ";
+        }
+        std::cout << "0x" << std::hex << std::setw(16) << std::setfill('0') << values.at(index)
+                  << "ULL" << (index + 1 == values.size() ? "" : ", ");
+        if (index % 4 == 3) {
+            std::cout << '\n';
+        }
+    }
+    std::cout << "}};\n";
+}
+}  // namespace
+
+int main() {
+    try {
+        std::array<Board, 64> rooks{};
+        std::array<Board, 64> bishops{};
+        for (int square = 0; square < 64; ++square) {
+            rooks.at(static_cast<std::size_t>(square)) = find_magic(square, false);
+            bishops.at(static_cast<std::size_t>(square)) = find_magic(square, true);
+        }
+        std::cout << "// SPDX-License-Identifier: GPL-3.0-or-later\n"
+                     "// Generated by tools/magic/generate.cpp; seed 0x4d6f7573654d6167.\n"
+                     "// Reproduction and provenance: tools/magic/README.md.\n"
+                     "#pragma once\n\n#include <array>\n#include <cstdint>\n\n"
+                     "namespace mouse::chess::detail {\n";
+        print_array("kRookMagics", rooks);
+        print_array("kBishopMagics", bishops);
+        std::cout << "}  // namespace mouse::chess::detail\n";
+        return std::cout ? 0 : 1;
+    } catch (const std::exception& error) {
+        std::fputs(error.what(), stderr);
+        std::fputs("\n", stderr);
+    } catch (...) {
+        std::fputs("Unrecognized exception at the generator boundary.\n", stderr);
+    }
+    return 1;
+}

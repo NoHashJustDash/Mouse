@@ -1,0 +1,18 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# MouseBenchPositions1: id<TAB>initial_fen<TAB>moves
+start	rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1	
+queens-pawn	rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1	d2d4 d7d5 c2c4 e7e6 b1c3 g8f6
+castle-white	rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1	e2e4 e7e5 g1f3 b8c6 f1c4 g8f6
+castle-both	r3k2r/ppp2ppp/2n5/3pp3/3PP3/2N5/PPP2PPP/R3K2R w KQkq - 0 1	
+castle-black	r3k2r/ppp2ppp/2n5/3pp3/3PP3/2N5/PPP2PPP/R3K2R b KQkq - 0 1	
+ep-white	4k3/8/8/3pP3/8/8/8/4K3 w - d6 0 2	
+ep-black	4k3/8/8/8/3Pp3/8/8/4K3 b - d3 0 2	
+promotion-white	4k3/P7/8/8/8/8/7p/4K3 w - - 0 1	
+promotion-black	4k3/P7/8/8/8/8/7p/4K3 b - - 0 1	
+pawnless	8/8/3k4/8/8/4K3/6R1/7r w - - 12 40	
+black-pawns	8/5pk1/6p1/8/3P4/5K2/8/8 b - - 0 30	
+rule50-99	7k/8/8/8/8/2K5/8/R7 w - - 99 70	
+history-repeat	rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1	g1f3 g8f6 f3g1 f6g8
+history-pawn-push	4k3/8/8/8/8/8/3P4/4K3 w - - 0 1	d2d4 e8f7 e1f2 f7e6
+history-capture	4k3/8/8/8/8/8/4r3/R3K3 w Q - 0 1	e1e2 e8d7 a1a7 d7c6
+spanish-black	rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1	e2e4 e7e5 g1f3 b8c6 f1b5

@@ -1,0 +1,31 @@
+{
+  "archive_url": "https://github.com/official-stockfish/Stockfish/releases/download/sf_17.1/stockfish-windows-x86-64-bmi2.zip",
+  "binary_path": "<workspace>\\.worktrees\\net-conversion\\.toolchain\\reference\\stockfish-17.1.exe",
+  "binary_sha256": "8f8c79837ddf2d0b7baccf555769778dd6a7e22bec823814fe19ea8bc37ff39f",
+  "cold_oracle_queries": 40352,
+  "commands": [
+    "uci",
+    "setoption name Threads value 1",
+    "setoption name Hash value 16",
+    "setoption name UCI_Chess960 value false",
+    "isready",
+    "position fen <query_fen> [moves <move>]",
+    "d",
+    "go perft 1"
+  ],
+  "development_interpreter": true,
+  "files": {
+    "mates.epd": "be84dd87800115c6272aff151a4e7bc9baa3385069b0bdf0d48cc5b89febcd97",
+    "mates.json": "f1f97847789db7d1a901a93172f6f7aa3c4f2ddc1d53a398fbe4a098a315941f",
+    "oracle-states.jsonl.gz": "fc547ba4453a7f68caf03f243b40e996a520aef20db3a0ff51b8aa93b727e3c2",
+    "uci-handshake.txt": "62171394a8c935c7c2a1efe26ef9a4dca6eb0ee81be0db3b31ab196c8f2d3123"
+  },
+  "legal_parser_sha256": "1da9293f0e7cb6a410870136ea43d02c2631aea3a0613f72df16dee936822c9e",
+  "persisted_cache_used": false,
+  "python": "3.12.14 (main, Aug 25 2026, 14:01:42) [MSC v.1944 64 bit (AMD64)]",
+  "release_url": "https://github.com/official-stockfish/Stockfish/releases/tag/sf_17.1",
+  "schema": 1,
+  "source_commit": "03e27488f3d21d8ff4dbf3065603afa21dbd0ef3",
+  "source_sha256": "20cab313ea7d063a827bd4c780d5676057bf329600a9c7eae10d587a5d09e2f5",
+  "wall_seconds": 12.60899999999674
+}

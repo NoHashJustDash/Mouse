@@ -1,0 +1,9 @@
+{
+  "name": "mouse",
+  "version-semver": "0.0.0",
+  "builtin-baseline": "a5f736224e85b32e25a8ffc52562333180396642",
+  "dependencies": [
+    "catch2",
+    "tl-expected"
+  ]
+}

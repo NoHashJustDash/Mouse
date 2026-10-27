@@ -1,0 +1,93 @@
+id name Lc0 v0.32.1
+id author The LCZero Authors.
+option name LogFile type string default 
+option name ConfigFile type string default 
+option name Ponder type check default false
+option name SyzygyPath type string default 
+option name Threads type spin default 1 min 0 max 128
+option name MinibatchSize type spin default 1 min 0 max 1024
+option name CPuct type string default 1.745000
+option name CPuctBase type string default 38739.000000
+option name CPuctFactor type string default 3.894000
+option name TwoFoldDraws type check default true
+option name VerboseMoveStats type check default true
+option name FpuStrategy type combo default reduction var reduction var absolute
+option name FpuValue type string default 0.330000
+option name CacheHistoryLength type spin default 0 min 0 max 7
+option name MaxCollisionEvents type spin default 917 min 1 max 65536
+option name MaxCollisionVisits type spin default 80000 min 1 max 100000000
+option name MaxCollisionVisitsScalingStart type spin default 28 min 1 max 100000
+option name MaxCollisionVisitsScalingEnd type spin default 145000 min 0 max 100000000
+option name MaxCollisionVisitsScalingPower type string default 1.250000
+option name OutOfOrderEval type check default true
+option name MaxOutOfOrderEvalsFactor type string default 2.400000
+option name StickyEndgames type check default true
+option name SyzygyFastPlay type check default false
+option name MultiPV type spin default 1 min 1 max 500
+option name PerPVCounters type check default false
+option name ScoreType type combo default WDL_mu var centipawn var centipawn_with_drawscore var centipawn_2019 var centipawn_2018 var win_percentage var Q var W-L var WDL_mu
+option name MovesLeftMaxEffect type string default 0.034500
+option name MovesLeftThreshold type string default 0.800000
+option name MovesLeftSlope type string default 0.002700
+option name MovesLeftConstantFactor type string default 0.000000
+option name MovesLeftScaledFactor type string default 1.652100
+option name MovesLeftQuadraticFactor type string default -0.652100
+option name MaxConcurrentSearchers type spin default 1 min 0 max 128
+option name DrawScore type string default 0.000000
+option name ContemptMode type combo default play var play var white_side_analysis var black_side_analysis var disable
+option name Contempt type string default 
+option name WDLCalibrationElo type string default 0.000000
+option name WDLEvalObjectivity type string default 1.000000
+option name WDLDrawRateReference type string default 0.500000
+option name NodesPerSecondLimit type string default 0.000000
+option name TaskWorkers type spin default 0 min -1 max 128
+option name MinimumProcessingWork type spin default 20 min 2 max 100000
+option name MinimumPickingWork type spin default 1 min 1 max 100000
+option name MinimumRemainingPickingWork type spin default 20 min 0 max 100000
+option name MinimumPerTaskProcessing type spin default 8 min 1 max 100000
+option name IdlingMinimumWork type spin default 0 min 0 max 10000
+option name ThreadIdlingThreshold type spin default 1 min 0 max 128
+option name UCI_Opponent type string default 
+option name UCI_RatingAdv type string default 0.000000
+option name SearchSpinBackoff type check default false
+option name MaxPrefetch type spin default 0 min 0 max 1024
+option name SolidTreeThreshold type spin default 100 min 1 max 2000000000
+option name SmartPruningFactor type string default 1.330000
+option name SmartPruningMinimumBatches type spin default 0 min 0 max 10000
+option name RamLimitMb type spin default 0 min 0 max 100000000
+option name MoveOverheadMs type spin default 200 min 0 max 100000000
+option name TimeManager type string default legacy
+option name UCI_Chess960 type check default false
+option name UCI_ShowWDL type check default true
+option name UCI_ShowMovesLeft type check default false
+option name PolicyTemperature type string default 1.359000
+option name HistoryFill type combo default fen_only var no var fen_only var always
+option name WeightsFile type string default 
+option name Backend type combo default trivial var cuda-auto var cuda var cuda-fp16 var trivial var random var check var roundrobin var recordreplay var multiplexing var demux
+option name BackendOptions type string default 
+option name NNCacheSize type spin default 0 min 0 max 999999999
+uciok
+readyok
+info depth 1 seldepth 1 time 0 nodes 1 score cp 0 wdl 500 0 500 tbhits 0 pv g1f3
+info string g1h3  (161 ) N:       0 (+ 0) (P:  1.59%) (WL:  -.-----) (D: -.---) (M:  -.-) (Q: -0.00000) (U: 0.02775) (S:  0.02775) (V:  -.----) 
+info string g2g4  (378 ) N:       0 (+ 0) (P:  1.67%) (WL:  -.-----) (D: -.---) (M:  -.-) (Q: -0.00000) (U: 0.02917) (S:  0.02917) (V:  -.----) 
+info string b1a3  (34  ) N:       0 (+ 0) (P:  1.97%) (WL:  -.-----) (D: -.---) (M:  -.-) (Q: -0.00000) (U: 0.03430) (S:  0.03430) (V:  -.----) 
+info string b2b4  (234 ) N:       0 (+ 0) (P:  2.25%) (WL:  -.-----) (D: -.---) (M:  -.-) (Q: -0.00000) (U: 0.03922) (S:  0.03922) (V:  -.----) 
+info string h2h4  (403 ) N:       0 (+ 0) (P:  2.34%) (WL:  -.-----) (D: -.---) (M:  -.-) (Q: -0.00000) (U: 0.04078) (S:  0.04078) (V:  -.----) 
+info string f2f4  (351 ) N:       0 (+ 0) (P:  2.59%) (WL:  -.-----) (D: -.---) (M:  -.-) (Q: -0.00000) (U: 0.04519) (S:  0.04519) (V:  -.----) 
+info string f2f3  (346 ) N:       0 (+ 0) (P:  2.92%) (WL:  -.-----) (D: -.---) (M:  -.-) (Q: -0.00000) (U: 0.05090) (S:  0.05090) (V:  -.----) 
+info string a2a4  (207 ) N:       0 (+ 0) (P:  3.15%) (WL:  -.-----) (D: -.---) (M:  -.-) (Q: -0.00000) (U: 0.05499) (S:  0.05499) (V:  -.----) 
+info string b2b3  (230 ) N:       0 (+ 0) (P:  3.31%) (WL:  -.-----) (D: -.---) (M:  -.-) (Q: -0.00000) (U: 0.05784) (S:  0.05784) (V:  -.----) 
+info string a2a3  (204 ) N:       0 (+ 0) (P:  3.49%) (WL:  -.-----) (D: -.---) (M:  -.-) (Q: -0.00000) (U: 0.06090) (S:  0.06090) (V:  -.----) 
+info string h2h3  (400 ) N:       0 (+ 0) (P:  3.67%) (WL:  -.-----) (D: -.---) (M:  -.-) (Q: -0.00000) (U: 0.06396) (S:  0.06396) (V:  -.----) 
+info string g2g3  (374 ) N:       0 (+ 0) (P:  3.76%) (WL:  -.-----) (D: -.---) (M:  -.-) (Q: -0.00000) (U: 0.06569) (S:  0.06569) (V:  -.----) 
+info string c2c3  (259 ) N:       0 (+ 0) (P:  4.96%) (WL:  -.-----) (D: -.---) (M:  -.-) (Q: -0.00000) (U: 0.08659) (S:  0.08659) (V:  -.----) 
+info string d2d3  (288 ) N:       0 (+ 0) (P:  5.49%) (WL:  -.-----) (D: -.---) (M:  -.-) (Q: -0.00000) (U: 0.09586) (S:  0.09586) (V:  -.----) 
+info string e2e4  (322 ) N:       0 (+ 0) (P:  5.97%) (WL:  -.-----) (D: -.---) (M:  -.-) (Q: -0.00000) (U: 0.10414) (S:  0.10414) (V:  -.----) 
+info string e2e3  (317 ) N:       0 (+ 0) (P:  7.53%) (WL:  -.-----) (D: -.---) (M:  -.-) (Q: -0.00000) (U: 0.13138) (S:  0.13138) (V:  -.----) 
+info string c2c4  (264 ) N:       0 (+ 0) (P:  7.68%) (WL:  -.-----) (D: -.---) (M:  -.-) (Q: -0.00000) (U: 0.13410) (S:  0.13410) (V:  -.----) 
+info string b1c3  (36  ) N:       0 (+ 0) (P:  8.14%) (WL:  -.-----) (D: -.---) (M:  -.-) (Q: -0.00000) (U: 0.14203) (S:  0.14203) (V:  -.----) 
+info string d2d4  (293 ) N:       0 (+ 0) (P: 12.01%) (WL:  -.-----) (D: -.---) (M:  -.-) (Q: -0.00000) (U: 0.20951) (S:  0.20951) (V:  -.----) 
+info string g1f3  (159 ) N:       0 (+ 0) (P: 15.52%) (WL:  -.-----) (D: -.---) (M:  -.-) (Q: -0.00000) (U: 0.27086) (S:  0.27086) (V:  -.----) 
+info string node  (  20) N:       1 (+ 0) (P:  0.00%) (WL: -0.00000) (D: 0.000) (M:  0.0) (Q:  0.00000) (V:  -.----) 
+bestmove g1f3

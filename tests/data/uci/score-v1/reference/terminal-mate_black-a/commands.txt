@@ -1,0 +1,6 @@
+uci
+isready
+ucinewgame
+position fen 8/8/8/8/8/6q1/5k2/7K b - - 0 1
+go nodes 2 searchmoves g3g2
+quit

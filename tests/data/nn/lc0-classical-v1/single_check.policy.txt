@@ -1,0 +1,9 @@
+info depth 1 seldepth 2 time 0 nodes 2 score cp -176 tbhits 0 pv e1d1 e2e3
+info depth 2 seldepth 3 time 0 nodes 3 score cp -174 tbhits 0 pv e1d1 e2e3 d1c2
+info depth 2 seldepth 3 time 0 nodes 5 score cp 0 tbhits 0 pv e1e2
+info depth 2 seldepth 3 time 0 nodes 32 score cp 0 tbhits 0 pv e1e2
+info string e1f1  (101 ) N:       2 (+ 0) (P: 29.32%) (WL: -0.83771) (D: 0.000) (M:  0.5) (Q: -0.83771) (U: 0.95123) (S:  0.11352) (V:  -.----) 
+info string e1d1  (100 ) N:       2 (+ 0) (P: 39.26%) (WL: -0.84153) (D: 0.000) (M:  0.5) (Q: -0.84153) (U: 1.27359) (S:  0.43205) (V:  -.----) 
+info string e1e2  (106 ) N:      27 (+ 0) (P: 31.42%) (WL:  0.00000) (D: 1.000) (M:  0.0) (Q:  0.00000) (U: 0.10922) (S:  0.10922) (V:  0.0000) (T) 
+info string node  (   3) N:      32 (+ 0) (P: 100.0%) (WL: -0.13141) (D: 0.844) (M:  1.0) (Q: -0.13141) (V:  -.----) 
+bestmove e1e2

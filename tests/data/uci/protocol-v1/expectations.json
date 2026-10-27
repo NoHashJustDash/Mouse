@@ -1,0 +1,1256 @@
+{
+  "schema": 1,
+  "suite": "mouse-uci-protocol-v1",
+  "cpu_only": true,
+  "maximum_line_bytes": 1048576,
+  "stop_race_repetitions": 8,
+  "options": {
+    "WeightsFile": "{weights}",
+    "Backend": "cpu",
+    "Precision": "fp32",
+    "Threads": "1",
+    "MinibatchSize": "1",
+    "NNCacheSize": "0",
+    "RamLimitMb": "64",
+    "CPuct": "1.745",
+    "CPuctBase": "38739",
+    "CPuctFactor": "3.894",
+    "FpuValue": "0.33",
+    "FpuStrategyAtRoot": "same",
+    "FpuValueAtRoot": "1",
+    "PolicyTemperature": "1.359",
+    "MultiPV": "1",
+    "UCI_ShowWDL": "false",
+    "UCI_Chess960": "false",
+    "Ponder": "false",
+    "MoveOverheadMs": "0",
+    "GpuDllDirectories": "<empty>",
+    "CacheDirectory": "<empty>",
+    "Device": "0",
+    "CpuThreads": "1",
+    "WorkspaceMb": "16",
+    "Deterministic": "true"
+  },
+  "cases": [
+    {
+      "id": "handshake_options",
+      "startup": "configured",
+      "steps": [
+        {
+          "send": "uci"
+        },
+        {
+          "handshake": {}
+        },
+        {
+          "send": "setoption name WeightsFile value {weights}"
+        },
+        {
+          "send": "setoption name Backend value cpu"
+        },
+        {
+          "send": "setoption name Precision value fp32"
+        },
+        {
+          "send": "setoption name Threads value 1"
+        },
+        {
+          "send": "setoption name MinibatchSize value 1"
+        },
+        {
+          "send": "setoption name NNCacheSize value 0"
+        },
+        {
+          "send": "setoption name RamLimitMb value 64"
+        },
+        {
+          "send": "setoption name CPuct value 1.745"
+        },
+        {
+          "send": "setoption name CPuctBase value 38739"
+        },
+        {
+          "send": "setoption name CPuctFactor value 3.894"
+        },
+        {
+          "send": "setoption name FpuValue value 0.33"
+        },
+        {
+          "send": "setoption name FpuStrategyAtRoot value same"
+        },
+        {
+          "send": "setoption name FpuValueAtRoot value 1"
+        },
+        {
+          "send": "setoption name PolicyTemperature value 1.359"
+        },
+        {
+          "send": "setoption name MultiPV value 1"
+        },
+        {
+          "send": "setoption name UCI_ShowWDL value false"
+        },
+        {
+          "send": "setoption name UCI_Chess960 value false"
+        },
+        {
+          "send": "setoption name Ponder value false"
+        },
+        {
+          "send": "setoption name MoveOverheadMs value 0"
+        },
+        {
+          "send": "setoption name GpuDllDirectories value <empty>"
+        },
+        {
+          "send": "setoption name CacheDirectory value <empty>"
+        },
+        {
+          "send": "setoption name Device value 0"
+        },
+        {
+          "send": "setoption name CpuThreads value 1"
+        },
+        {
+          "send": "setoption name WorkspaceMb value 16"
+        },
+        {
+          "send": "setoption name Deterministic value true"
+        },
+        {
+          "send": "uci"
+        },
+        {
+          "handshake": {
+            "WeightsFile": "{weights}",
+            "Backend": "cpu",
+            "Precision": "fp32",
+            "Threads": "1",
+            "MinibatchSize": "1",
+            "NNCacheSize": "0",
+            "RamLimitMb": "64",
+            "CPuct": "1.745",
+            "CPuctBase": "38739",
+            "CPuctFactor": "3.894",
+            "FpuValue": "0.33",
+            "FpuStrategyAtRoot": "same",
+            "FpuValueAtRoot": "1",
+            "PolicyTemperature": "1.359",
+            "MultiPV": "1",
+            "UCI_ShowWDL": "false",
+            "UCI_Chess960": "false",
+            "Ponder": "false",
+            "MoveOverheadMs": "0",
+            "GpuDllDirectories": "<empty>",
+            "CacheDirectory": "<empty>",
+            "Device": "0",
+            "CpuThreads": "1",
+            "WorkspaceMb": "16",
+            "Deterministic": "true"
+          }
+        },
+        {
+          "send": "isready"
+        },
+        {
+          "expect": "readyok"
+        },
+        {
+          "send": "debug on"
+        },
+        {
+          "expect": "info string debug on"
+        },
+        {
+          "send": "debug off"
+        },
+        {
+          "expect": "info string debug off"
+        },
+        {
+          "send": "quit"
+        },
+        {
+          "exit": 0
+        }
+      ]
+    },
+    {
+      "id": "missing_weights",
+      "startup": "bare",
+      "steps": [
+        {
+          "send": "uci"
+        },
+        {
+          "handshake": {}
+        },
+        {
+          "send": "setoption name Backend value cpu"
+        },
+        {
+          "send": "setoption name Precision value fp32"
+        },
+        {
+          "send": "isready"
+        },
+        {
+          "error": "WeightsFile"
+        },
+        {
+          "expect": "readyok"
+        },
+        {
+          "send": "go nodes 1"
+        },
+        {
+          "error": "WeightsFile"
+        },
+        {
+          "send": "quit"
+        },
+        {
+          "exit": 0
+        }
+      ]
+    },
+    {
+      "id": "finite_publication",
+      "startup": "configured",
+      "steps": [
+        {
+          "send": "isready"
+        },
+        {
+          "expect": "readyok"
+        },
+        {
+          "send": "ucinewgame"
+        },
+        {
+          "send": "position startpos"
+        },
+        {
+          "send": "go nodes 16 searchmoves e2e4"
+        },
+        {
+          "best": {
+            "allowed": [
+              "e2e4"
+            ],
+            "nodes_max": 16,
+            "multipv": 1,
+            "wdl": false,
+            "terminal": false
+          }
+        },
+        {
+          "send": "position startpos moves e2e4"
+        },
+        {
+          "send": "go nodes 16 searchmoves e7e5"
+        },
+        {
+          "best": {
+            "allowed": [
+              "e7e5"
+            ],
+            "nodes_max": null,
+            "multipv": 1,
+            "wdl": false,
+            "terminal": false
+          }
+        },
+        {
+          "send": "quit"
+        },
+        {
+          "exit": 0
+        }
+      ]
+    },
+    {
+      "id": "finite_limits",
+      "startup": "configured",
+      "steps": [
+        {
+          "send": "setoption name MoveOverheadMs value 0"
+        },
+        {
+          "send": "ucinewgame"
+        },
+        {
+          "send": "position startpos"
+        },
+        {
+          "send": "go nodes 16 searchmoves e2e4"
+        },
+        {
+          "best": {
+            "allowed": [
+              "e2e4"
+            ],
+            "nodes_max": 16,
+            "multipv": 1,
+            "wdl": false,
+            "terminal": false
+          }
+        },
+        {
+          "send": "ucinewgame"
+        },
+        {
+          "send": "position startpos"
+        },
+        {
+          "send": "go movetime 25 searchmoves e2e4"
+        },
+        {
+          "best": {
+            "allowed": [
+              "e2e4"
+            ],
+            "nodes_max": null,
+            "multipv": 1,
+            "wdl": false,
+            "terminal": false
+          }
+        },
+        {
+          "send": "ucinewgame"
+        },
+        {
+          "send": "position startpos"
+        },
+        {
+          "send": "go depth 2 searchmoves e2e4"
+        },
+        {
+          "best": {
+            "allowed": [
+              "e2e4"
+            ],
+            "nodes_max": null,
+            "multipv": 1,
+            "wdl": false,
+            "terminal": false
+          }
+        },
+        {
+          "send": "ucinewgame"
+        },
+        {
+          "send": "position startpos"
+        },
+        {
+          "send": "go wtime 100 btime 100 winc 1 binc 1 movestogo 20 searchmoves e2e4"
+        },
+        {
+          "best": {
+            "allowed": [
+              "e2e4"
+            ],
+            "nodes_max": null,
+            "multipv": 1,
+            "wdl": false,
+            "terminal": false
+          }
+        },
+        {
+          "send": "ucinewgame"
+        },
+        {
+          "send": "position startpos"
+        },
+        {
+          "send": "go mate 1 searchmoves e2e4"
+        },
+        {
+          "best": {
+            "allowed": [
+              "e2e4"
+            ],
+            "nodes_max": null,
+            "multipv": 1,
+            "wdl": false,
+            "terminal": false
+          }
+        },
+        {
+          "send": "quit"
+        },
+        {
+          "exit": 0
+        }
+      ]
+    },
+    {
+      "id": "multipv_wdl",
+      "startup": "configured",
+      "steps": [
+        {
+          "send": "setoption name MultiPV value 3"
+        },
+        {
+          "send": "setoption name UCI_ShowWDL value true"
+        },
+        {
+          "send": "ucinewgame"
+        },
+        {
+          "send": "position startpos"
+        },
+        {
+          "send": "go nodes 32 searchmoves e2e4 d2d4 g1f3"
+        },
+        {
+          "best": {
+            "allowed": [
+              "e2e4",
+              "d2d4",
+              "g1f3"
+            ],
+            "nodes_max": 32,
+            "multipv": 3,
+            "wdl": true,
+            "terminal": false
+          }
+        },
+        {
+          "send": "quit"
+        },
+        {
+          "exit": 0
+        }
+      ]
+    },
+    {
+      "id": "invalid_input",
+      "startup": "configured",
+      "steps": [
+        {
+          "send": "not-a-command"
+        },
+        {
+          "error": "Unknown UCI"
+        },
+        {
+          "send": "go nodes 1 nodes 2"
+        },
+        {
+          "error": "Duplicate go"
+        },
+        {
+          "send": "go nodes 18446744073709551616"
+        },
+        {
+          "error": "nodes"
+        },
+        {
+          "send": "go nodes nan"
+        },
+        {
+          "error": "nodes"
+        },
+        {
+          "send": "go mystery 1"
+        },
+        {
+          "error": "Unknown go"
+        },
+        {
+          "send": "go searchmoves"
+        },
+        {
+          "error": "searchmoves"
+        },
+        {
+          "send": "go searchmoves e2e4 e2e4"
+        },
+        {
+          "error": "Duplicate"
+        },
+        {
+          "send": "debug maybe"
+        },
+        {
+          "error": "debug"
+        },
+        {
+          "send": "setoption name UnknownOption value 1"
+        },
+        {
+          "error": "Unknown option"
+        },
+        {
+          "send": "setoption name CPuct value nan"
+        },
+        {
+          "error": "CPuct"
+        },
+        {
+          "send": "setoption name Threads value 0"
+        },
+        {
+          "error": "Threads"
+        },
+        {
+          "send": "position fen 8/8/8/8/8/8/8/8 w - - 0 1"
+        },
+        {
+          "error": "FEN"
+        },
+        {
+          "send": "ucinewgame extra"
+        },
+        {
+          "error": "Unexpected"
+        },
+        {
+          "send": "ponderhit"
+        },
+        {
+          "error": "ponderhit"
+        },
+        {
+          "send": "go ponder nodes 1"
+        },
+        {
+          "error": "Ponder"
+        },
+        {
+          "send": "go wtime 10 position"
+        },
+        {
+          "error": "go"
+        },
+        {
+          "send": "uci\u0000"
+        },
+        {
+          "error": "control"
+        },
+        {
+          "send": "isready"
+        },
+        {
+          "expect": "readyok"
+        },
+        {
+          "send": "quit"
+        },
+        {
+          "exit": 0
+        }
+      ]
+    },
+    {
+      "id": "illegal_history_transaction",
+      "startup": "configured",
+      "steps": [
+        {
+          "send": "position startpos moves e2e4"
+        },
+        {
+          "send": "position startpos moves e2e4 e7e5 e4e6"
+        },
+        {
+          "error": "Illegal position move"
+        },
+        {
+          "send": "go nodes 8 searchmoves e7e5"
+        },
+        {
+          "best": {
+            "allowed": [
+              "e7e5"
+            ],
+            "nodes_max": 8,
+            "multipv": 1,
+            "wdl": false,
+            "terminal": false
+          }
+        },
+        {
+          "send": "quit"
+        },
+        {
+          "exit": 0
+        }
+      ]
+    },
+    {
+      "id": "illegal_searchmoves",
+      "startup": "configured",
+      "steps": [
+        {
+          "send": "ucinewgame"
+        },
+        {
+          "send": "position startpos"
+        },
+        {
+          "send": "go nodes 8 searchmoves e2e5"
+        },
+        {
+          "error": "Illegal searchmoves"
+        },
+        {
+          "send": "go nodes 8 searchmoves d2d4"
+        },
+        {
+          "best": {
+            "allowed": [
+              "d2d4"
+            ],
+            "nodes_max": 8,
+            "multipv": 1,
+            "wdl": false,
+            "terminal": false
+          }
+        },
+        {
+          "send": "quit"
+        },
+        {
+          "exit": 0
+        }
+      ]
+    },
+    {
+      "id": "infinite_stop_ready",
+      "startup": "configured",
+      "steps": [
+        {
+          "send": "ucinewgame"
+        },
+        {
+          "send": "position startpos"
+        },
+        {
+          "send": "go infinite searchmoves e2e4"
+        },
+        {
+          "quiet": 0.12
+        },
+        {
+          "send": "isready"
+        },
+        {
+          "expect": "readyok"
+        },
+        {
+          "send": "stop"
+        },
+        {
+          "best": {
+            "allowed": [
+              "e2e4"
+            ],
+            "nodes_max": null,
+            "multipv": 1,
+            "wdl": false,
+            "terminal": false
+          }
+        },
+        {
+          "quiet": 0.08
+        },
+        {
+          "send": "quit"
+        },
+        {
+          "exit": 0
+        }
+      ]
+    },
+    {
+      "id": "active_rejection",
+      "startup": "configured",
+      "steps": [
+        {
+          "send": "ucinewgame"
+        },
+        {
+          "send": "position startpos"
+        },
+        {
+          "send": "go infinite nodes 8 searchmoves e2e4"
+        },
+        {
+          "quiet": 0.08
+        },
+        {
+          "send": "position startpos"
+        },
+        {
+          "error": "active search"
+        },
+        {
+          "send": "setoption name Threads value 1"
+        },
+        {
+          "error": "active search"
+        },
+        {
+          "send": "go nodes 2"
+        },
+        {
+          "error": "active search"
+        },
+        {
+          "send": "isready"
+        },
+        {
+          "expect": "readyok"
+        },
+        {
+          "send": "stop"
+        },
+        {
+          "best": {
+            "allowed": [
+              "e2e4"
+            ],
+            "nodes_max": 8,
+            "multipv": 1,
+            "wdl": false,
+            "terminal": false
+          }
+        },
+        {
+          "send": "quit"
+        },
+        {
+          "exit": 0
+        }
+      ]
+    },
+    {
+      "id": "ponder_hit",
+      "startup": "configured",
+      "steps": [
+        {
+          "send": "isready"
+        },
+        {
+          "expect": "readyok"
+        },
+        {
+          "send": "setoption name Ponder value true"
+        },
+        {
+          "send": "ucinewgame"
+        },
+        {
+          "send": "position startpos"
+        },
+        {
+          "send": "go ponder nodes 8 wtime 1000 btime 1000 winc 1 binc 1 searchmoves e2e4"
+        },
+        {
+          "quiet": 0.12
+        },
+        {
+          "send": "isready"
+        },
+        {
+          "expect": "readyok"
+        },
+        {
+          "send": "ponderhit"
+        },
+        {
+          "best": {
+            "allowed": [
+              "e2e4"
+            ],
+            "nodes_max": null,
+            "multipv": 1,
+            "wdl": false,
+            "terminal": false
+          }
+        },
+        {
+          "quiet": 0.08
+        },
+        {
+          "send": "quit"
+        },
+        {
+          "exit": 0
+        }
+      ]
+    },
+    {
+      "id": "ponder_stop",
+      "startup": "configured",
+      "steps": [
+        {
+          "send": "setoption name Ponder value true"
+        },
+        {
+          "send": "ucinewgame"
+        },
+        {
+          "send": "position startpos"
+        },
+        {
+          "send": "go ponder nodes 8 searchmoves d2d4"
+        },
+        {
+          "quiet": 0.1
+        },
+        {
+          "send": "stop"
+        },
+        {
+          "best": {
+            "allowed": [
+              "d2d4"
+            ],
+            "nodes_max": 8,
+            "multipv": 1,
+            "wdl": false,
+            "terminal": false
+          }
+        },
+        {
+          "send": "quit"
+        },
+        {
+          "exit": 0
+        }
+      ]
+    },
+    {
+      "id": "stop_activation_race",
+      "startup": "configured",
+      "steps": [
+        {
+          "send": "ucinewgame"
+        },
+        {
+          "send": "position startpos"
+        },
+        {
+          "send": "go infinite nodes 64 searchmoves e2e4"
+        },
+        {
+          "send": "stop"
+        },
+        {
+          "best": {
+            "allowed": [
+              "e2e4"
+            ],
+            "nodes_max": 64,
+            "multipv": 1,
+            "wdl": false,
+            "terminal": false
+          }
+        },
+        {
+          "send": "ucinewgame"
+        },
+        {
+          "send": "position startpos"
+        },
+        {
+          "send": "go infinite nodes 64 searchmoves e2e4"
+        },
+        {
+          "send": "stop"
+        },
+        {
+          "best": {
+            "allowed": [
+              "e2e4"
+            ],
+            "nodes_max": 64,
+            "multipv": 1,
+            "wdl": false,
+            "terminal": false
+          }
+        },
+        {
+          "send": "ucinewgame"
+        },
+        {
+          "send": "position startpos"
+        },
+        {
+          "send": "go infinite nodes 64 searchmoves e2e4"
+        },
+        {
+          "send": "stop"
+        },
+        {
+          "best": {
+            "allowed": [
+              "e2e4"
+            ],
+            "nodes_max": 64,
+            "multipv": 1,
+            "wdl": false,
+            "terminal": false
+          }
+        },
+        {
+          "send": "ucinewgame"
+        },
+        {
+          "send": "position startpos"
+        },
+        {
+          "send": "go infinite nodes 64 searchmoves e2e4"
+        },
+        {
+          "send": "stop"
+        },
+        {
+          "best": {
+            "allowed": [
+              "e2e4"
+            ],
+            "nodes_max": 64,
+            "multipv": 1,
+            "wdl": false,
+            "terminal": false
+          }
+        },
+        {
+          "send": "ucinewgame"
+        },
+        {
+          "send": "position startpos"
+        },
+        {
+          "send": "go infinite nodes 64 searchmoves e2e4"
+        },
+        {
+          "send": "stop"
+        },
+        {
+          "best": {
+            "allowed": [
+              "e2e4"
+            ],
+            "nodes_max": 64,
+            "multipv": 1,
+            "wdl": false,
+            "terminal": false
+          }
+        },
+        {
+          "send": "ucinewgame"
+        },
+        {
+          "send": "position startpos"
+        },
+        {
+          "send": "go infinite nodes 64 searchmoves e2e4"
+        },
+        {
+          "send": "stop"
+        },
+        {
+          "best": {
+            "allowed": [
+              "e2e4"
+            ],
+            "nodes_max": 64,
+            "multipv": 1,
+            "wdl": false,
+            "terminal": false
+          }
+        },
+        {
+          "send": "ucinewgame"
+        },
+        {
+          "send": "position startpos"
+        },
+        {
+          "send": "go infinite nodes 64 searchmoves e2e4"
+        },
+        {
+          "send": "stop"
+        },
+        {
+          "best": {
+            "allowed": [
+              "e2e4"
+            ],
+            "nodes_max": 64,
+            "multipv": 1,
+            "wdl": false,
+            "terminal": false
+          }
+        },
+        {
+          "send": "ucinewgame"
+        },
+        {
+          "send": "position startpos"
+        },
+        {
+          "send": "go infinite nodes 64 searchmoves e2e4"
+        },
+        {
+          "send": "stop"
+        },
+        {
+          "best": {
+            "allowed": [
+              "e2e4"
+            ],
+            "nodes_max": 64,
+            "multipv": 1,
+            "wdl": false,
+            "terminal": false
+          }
+        },
+        {
+          "send": "quit"
+        },
+        {
+          "exit": 0
+        }
+      ]
+    },
+    {
+      "id": "quit_active",
+      "startup": "configured",
+      "steps": [
+        {
+          "send": "ucinewgame"
+        },
+        {
+          "send": "position startpos"
+        },
+        {
+          "send": "go infinite nodes 8 searchmoves e2e4"
+        },
+        {
+          "send": "quit"
+        },
+        {
+          "exit": 0
+        }
+      ]
+    },
+    {
+      "id": "eof_active",
+      "startup": "configured",
+      "steps": [
+        {
+          "send": "ucinewgame"
+        },
+        {
+          "send": "position startpos"
+        },
+        {
+          "send": "go infinite nodes 8 searchmoves e2e4"
+        },
+        {
+          "eof": true
+        },
+        {
+          "exit": 0
+        }
+      ]
+    },
+    {
+      "id": "unterminated_eof",
+      "startup": "bare",
+      "steps": [
+        {
+          "send": "uci",
+          "newline": false
+        },
+        {
+          "eof": true
+        },
+        {
+          "handshake": {}
+        },
+        {
+          "exit": 0
+        }
+      ]
+    },
+    {
+      "id": "oversized_framing",
+      "startup": "configured",
+      "steps": [
+        {
+          "oversize": true
+        },
+        {
+          "send": "isready"
+        },
+        {
+          "error": "maximum"
+        },
+        {
+          "expect": "readyok"
+        },
+        {
+          "send": "uci"
+        },
+        {
+          "handshake": {}
+        },
+        {
+          "send": "quit"
+        },
+        {
+          "exit": 0
+        }
+      ]
+    },
+    {
+      "id": "deterministic_repeat",
+      "startup": "configured",
+      "steps": [
+        {
+          "send": "ucinewgame"
+        },
+        {
+          "send": "position startpos"
+        },
+        {
+          "send": "go nodes 32 searchmoves e2e4 d2d4"
+        },
+        {
+          "best": {
+            "allowed": [
+              "e2e4",
+              "d2d4"
+            ],
+            "nodes_max": 32,
+            "multipv": 1,
+            "wdl": false,
+            "terminal": false
+          }
+        },
+        {
+          "send": "ucinewgame"
+        },
+        {
+          "send": "position startpos"
+        },
+        {
+          "send": "go nodes 32 searchmoves e2e4 d2d4"
+        },
+        {
+          "best": {
+            "allowed": [
+              "e2e4",
+              "d2d4"
+            ],
+            "nodes_max": 32,
+            "multipv": 1,
+            "wdl": false,
+            "terminal": false
+          }
+        },
+        {
+          "repeat_equal": true
+        },
+        {
+          "send": "quit"
+        },
+        {
+          "exit": 0
+        }
+      ]
+    },
+    {
+      "id": "fen_chess960",
+      "startup": "configured",
+      "steps": [
+        {
+          "send": "setoption name UCI_Chess960 value true"
+        },
+        {
+          "send": "position fen 4k3/8/8/8/8/8/8/5KR1 w G - 0 1"
+        },
+        {
+          "send": "go nodes 8 searchmoves f1g1"
+        },
+        {
+          "best": {
+            "allowed": [
+              "f1g1"
+            ],
+            "nodes_max": 8,
+            "multipv": 1,
+            "wdl": false,
+            "terminal": false
+          }
+        },
+        {
+          "send": "quit"
+        },
+        {
+          "exit": 0
+        }
+      ]
+    },
+    {
+      "id": "terminal_root",
+      "startup": "configured",
+      "steps": [
+        {
+          "send": "position fen 7k/6Q1/5K2/8/8/8/8/8 b - - 0 1"
+        },
+        {
+          "send": "go nodes 8"
+        },
+        {
+          "best": {
+            "allowed": [
+              "0000"
+            ],
+            "nodes_max": 8,
+            "multipv": 1,
+            "wdl": false,
+            "terminal": true
+          }
+        },
+        {
+          "send": "quit"
+        },
+        {
+          "exit": 0
+        }
+      ]
+    },
+    {
+      "id": "fatal_inference_idle",
+      "startup": "failure",
+      "steps": [
+        {
+          "send": "isready"
+        },
+        {
+          "expect": "readyok"
+        },
+        {
+          "send": "position startpos"
+        },
+        {
+          "send": "go nodes 8"
+        },
+        {
+          "error": "finite"
+        },
+        {
+          "exit": "nonzero"
+        }
+      ]
+    }
+  ]
+}

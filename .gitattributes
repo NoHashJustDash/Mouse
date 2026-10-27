@@ -1,0 +1,37 @@
+* text=auto eol=lf
+*.cmd text eol=crlf
+*.bat text eol=crlf
+*.zip binary
+*.gz binary
+*.onnx binary
+*.png binary
+*.jpg binary
+*.exe binary
+*.dll binary
+
+# Hash-bound Lc0 transcripts retain the reference binary output whitespace.
+tests/data/nn/lc0-classical-v1/*.policy.txt whitespace=-blank-at-eol
+
+# Original byte-pinned score evidence preserves CRLF and reference output spaces.
+# Maintained scripts outside reference/ retain normal LF and whitespace checks.
+tests/data/uci/score-v1/reference/** -text whitespace=-blank-at-eol,-blank-at-eof,cr-at-eol
+
+# Empty move fields are meaningful third TSV columns in this fixed corpus.
+tests/data/bench/positions-v1.tsv whitespace=-blank-at-eol
+
+# Native oracle capture is retained byte-for-byte, including JSON line endings.
+docs/benchmarks/stockfish17-handshake-separator-20261017.json -text
+
+docs/benchmarks/clean-engine-comparison-20261017.json -text
+
+docs/benchmarks/clean-backend-confirmation-20261017.json -text
+
+docs/benchmarks/clean-gpu-preflight-20261017.json -text
+
+docs/benchmarks/clean-development-package-20261017.json -text
+
+docs/benchmarks/clean-cpu-ctest-20261017.txt -text
+
+docs/benchmarks/clean-root-same-mates18-20261017.json -text
+
+docs/benchmarks/clean-package-smoke10-reaudit-20261017.json -text

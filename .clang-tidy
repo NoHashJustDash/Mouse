@@ -1,0 +1,17 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+Checks: >
+  -*,
+  bugprone-*,
+  performance-*,
+  modernize-*,
+  cppcoreguidelines-*,
+  -modernize-use-trailing-return-type,
+  -cppcoreguidelines-avoid-magic-numbers,
+  -cppcoreguidelines-pro-bounds-array-to-pointer-decay
+WarningsAsErrors: '*'
+HeaderFilterRegex: '[/\\](engine|tests)[/\\]'
+FormatStyle: file
+# Trailing return types conflict with the repository's conventional declaration style.
+# Tensor dimensions, test vectors and protocol constants are clearer as literals at the point of use;
+# production algorithms still name constants where the value has a semantic role.
+# ORT's C ABI accepts arrays as pointers; std::array::data() is used for new C++ interfaces.

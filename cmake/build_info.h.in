@@ -1,0 +1,12 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+#pragma once
+#include <string_view>
+
+namespace mouse::build {
+inline constexpr std::string_view version = "@MOUSE_IDENTITY_VERSION@";
+inline constexpr std::string_view git_hash = "@MOUSE_IDENTITY_HASH@";
+inline constexpr std::string_view build_type = "@CMAKE_BUILD_TYPE@";
+inline constexpr std::string_view compiler = "@MOUSE_COMPILER@";
+inline constexpr std::string_view required_ort_version = "@MOUSE_ORT_VERSION@";
+inline constexpr std::string_view runtime_filename = "@MOUSE_ORT_RUNTIME_FILENAME@";
+}  // namespace mouse::build
