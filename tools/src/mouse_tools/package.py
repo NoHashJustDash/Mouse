@@ -57,6 +57,19 @@ LICENSE_SHA256 = {
 STAGE_FILES = frozenset(
     {"mouse.exe", "README.md", "CHANGELOG.md"} | set(ORT_SHA256) | set(LICENSE_SHA256)
 )
+# Builds configured with MOUSE_TRT_MOE_PLUGIN=ON (CMake preset windows-moe) install the
+# Mouse-MoE TensorRT plugin and the CUTLASS 3.9.2 license it is compiled with.
+PLUGIN_LIBRARY = "mouse_moe_trt.dll"
+PLUGIN_LICENSE_SHA256 = {
+    "licenses/CUTLASS-LICENSE": (
+        "42fec630f410aa308f70a51a89fadcd19586fa620f9831a32bee528a9a10000e"
+    ),
+}
+PLUGIN_FILES = frozenset({PLUGIN_LIBRARY} | set(PLUGIN_LICENSE_SHA256))
+# The network a release ships with, under its public name. Nets that use the plugin carry
+# its operator name and cannot load without the library.
+NET_NAME = "M1.5.onnx"
+PLUGIN_OP = b"MouseMoeExperts"
 SUPPORT_REQUIRED = frozenset(
     {
         "tools/fetch_net.py",
@@ -69,6 +82,8 @@ SUPPORT_REQUIRED = frozenset(
         "tools/src/mouse_tools/__init__.py",
         "tools/src/mouse_tools/fetch_net.py",
         "tools/src/mouse_tools/convert/cli.py",
+        "docs/NETWORK.md",
+        "docs/NVIDIA_PERMISSION.md",
         "docs/TOOLCHAIN.md",
     }
 )
@@ -87,11 +102,16 @@ MAX_FILE = 512 * 1024 * 1024
 MAX_TOTAL = 1024 * 1024 * 1024
 MAX_MEMBERS = 10000
 MAX_SMALL_TEST_FIXTURE = 128 * 1024
+# The plugin's backend test needs a real, if tiny, routed network. Every other network in the
+# source stays under the small limit, so a production net cannot pass as a fixture.
+NAMED_TEST_FIXTURES = {"tests/data/backend/moe-tiny.onnx": 1024 * 1024}
 MAX_COMPRESSED_TEST_DATA = 16 * 1024 * 1024
 HEX = re.compile(r"[0-9a-f]{64}")
 # Unrelated projects are rejected by the closed SOURCE_DIRECTORIES allowlist.
 FORBIDDEN = {".git", ".toolchain", "nets", ".venv", "__pycache__", "node_modules"}
-SOURCE_DIRECTORIES = frozenset({"engine", "tests", "tools", "docs", "cmake", "scripts", ".github"})
+SOURCE_DIRECTORIES = frozenset(
+    {"engine", "tests", "tools", "docs", "cmake", "scripts", "third_party", ".github"}
+)
 SOURCE_ROOT_FILES = frozenset(
     {
         "AGENTS.md",
@@ -364,7 +384,8 @@ def parse_pe(data: bytes) -> dict[str, object]:
     return {"machine": "AMD64", "format": "PE32+", "imports": sorted(imports)}
 
 
-def stage_inventory(root: Path) -> set[str]:
+def stage_inventory(root: Path, plugin: bool = False) -> set[str]:
+    expected = STAGE_FILES | PLUGIN_FILES if plugin else STAGE_FILES
     require(
         root.is_dir()
         and not root.is_symlink()
@@ -380,19 +401,22 @@ def stage_inventory(root: Path) -> set[str]:
                 "Reparse license directory",
             )
             children = list(path.iterdir())
-            require(len(children) == 3, "Exact license inventory required")
+            require(
+                len(children) == len([n for n in expected if n.startswith("licenses/")]),
+                "Exact license inventory required",
+            )
             for child in children:
                 name = "licenses/" + child.name
-                require(name in STAGE_FILES, "Unexpected license file")
+                require(name in expected, "Unexpected license file")
                 regular(child)
                 found.add(name)
         else:
             require(
-                path.name in STAGE_FILES, "Unexpected stage payload; never scan unknown directories"
+                path.name in expected, "Unexpected stage payload; never scan unknown directories"
             )
             regular(path)
             found.add(path.name)
-    require(found == STAGE_FILES, "Exact11-file CMake install stage required")
+    require(found == expected, "Exact CMake install stage required (11 files, 13 with the plugin)")
     return found
 
 
@@ -416,6 +440,8 @@ class Plan:
     release: bool = False
     release_source: Path | None = None
     release_files: Mapping[str, str] | None = None
+    net: Path | None = None
+    net_sha256: str | None = None
 
     def verify(self) -> None:
         if self.release_source is not None:
@@ -427,7 +453,11 @@ class Plan:
             self.interpreter_alias.resolve(strict=True) == self.interpreter_target,
             "Interpreter alias changed after plan freeze",
         )
-        require(stage_inventory(self.stage) == set(self.stage_hashes), "Stage inventory changed")
+        plugin = PLUGIN_LIBRARY in self.stage_hashes
+        require(
+            stage_inventory(self.stage, plugin) == set(self.stage_hashes),
+            "Stage inventory changed",
+        )
         for name, expected in self.stage_hashes.items():
             require(digest(self.stage / name) == expected, f"Stage artifact changed:{name}")
         for path, expected in self.identities.items():
@@ -495,7 +525,11 @@ def _archive_inventory(plan: Plan) -> dict[str, str]:
             network_fixture = name.lower().endswith((".onnx", ".pb", ".pb.gz"))
             compressed_data = name.lower().endswith((".v6.gz", ".jsonl.gz"))
             if network_fixture or compressed_data or binary_data:
-                bound = MAX_COMPRESSED_TEST_DATA if compressed_data else MAX_SMALL_TEST_FIXTURE
+                bound = (
+                    MAX_COMPRESSED_TEST_DATA
+                    if compressed_data
+                    else NAMED_TEST_FIXTURES.get(name, MAX_SMALL_TEST_FIXTURE)
+                )
                 # These are opaque, hash-bound test inputs. The producer never
                 # decompresses their inner payload or executes fixture content.
                 require(
@@ -795,6 +829,11 @@ def _produce(plan: Plan, output: Path) -> dict[str, object]:
             destination.parent.mkdir(parents=True, exist_ok=True)
             with (plan.stage / name).open("rb") as src, destination.open("xb") as dst:
                 shutil.copyfileobj(src, dst, 1024 * 1024)
+        if plan.net is not None:
+            copied[NET_NAME] = cast(str, plan.net_sha256)
+            result["net_sha256"] = plan.net_sha256
+            with plan.net.open("rb") as src, (payload / NET_NAME).open("xb") as dst:
+                shutil.copyfileobj(src, dst, 1024 * 1024)
         with zipfile.ZipFile(plan.source) as archive:
             for name in plan.support:
                 target = payload / name
@@ -952,11 +991,14 @@ def _release_inventory(source: Path) -> dict[str, str]:
     return hashes
 
 
-def produce_release(source: Path, build: Path, version: str, output: Path) -> dict[str, object]:
+def produce_release(
+    source: Path, build: Path, version: str, output: Path, net: Path | None = None
+) -> dict[str, object]:
     """Package a configured release source tree without asserting tournament gates.
 
     This path is deliberately separate from the development JSON-plan interface.
     A pre-Git archive has an honest unknown commit; source content hashes bind it.
+    A network, when given, goes in the binary archive only, as NET_NAME.
     """
     require(
         re.fullmatch(
@@ -995,6 +1037,17 @@ def produce_release(source: Path, build: Path, version: str, output: Path) -> di
     require(fields.get("CMAKE_BUILD_TYPE") == "Release", "Require a Release CMake build")
     require(fields.get("MOUSE_VERSION") == version, "CMake release version mismatch")
     require(fields.get("MOUSE_GIT_HASH", "") in ("", "unknown"), "Archive commit override refused")
+    plugin_setting = fields.get("MOUSE_TRT_MOE_PLUGIN", "OFF").upper()
+    require(plugin_setting in ("ON", "OFF"), "MOUSE_TRT_MOE_PLUGIN must be ON or OFF")
+    plugin = plugin_setting == "ON"
+    net_sha256: str | None = None
+    if net is not None:
+        net = net.absolute()
+        net_sha256 = digest(net)
+        require(
+            plugin or PLUGIN_OP not in net.read_bytes(),
+            "This network needs the Mouse-MoE plugin; configure with MOUSE_TRT_MOE_PLUGIN=ON",
+        )
     hashes = _release_inventory(source)
     require(
         {"tools/setup_net.py", "tools/src/mouse_tools/setup_net.py"} <= hashes.keys(),
@@ -1011,7 +1064,7 @@ def produce_release(source: Path, build: Path, version: str, output: Path) -> di
         work = Path(temporary)
         stage = work / "stage"
         _release_command(["cmake", "--install", str(build), "--prefix", str(stage)], source)
-        stage_hashes = {name: digest(stage / name) for name in stage_inventory(stage)}
+        stage_hashes = {name: digest(stage / name) for name in stage_inventory(stage, plugin)}
         require(
             stage_hashes["mouse.exe"] == binary_hash, "Installed binary differs from source build"
         )
@@ -1020,6 +1073,10 @@ def produce_release(source: Path, build: Path, version: str, output: Path) -> di
         require(all(stage_hashes[n] == h for n, h in ORT_SHA256.items()), "Require pinned ORT DLLs")
         require(
             all(stage_hashes[n] == h for n, h in LICENSE_SHA256.items()), "License hash differs"
+        )
+        require(
+            not plugin or all(stage_hashes[n] == h for n, h in PLUGIN_LICENSE_SHA256.items()),
+            "CUTLASS license hash differs",
         )
         archived = work / "source.zip"
         with zipfile.ZipFile(archived, "x", zipfile.ZIP_DEFLATED, compresslevel=9) as archive:
@@ -1043,6 +1100,8 @@ def produce_release(source: Path, build: Path, version: str, output: Path) -> di
         }
         identities = {source / n: h for n, h in hashes.items()}
         identities.update({cache: cache_hash, executable: binary_hash, archived: digest(archived)})
+        if net is not None:
+            identities[net] = cast(str, net_sha256)
         interpreter_alias = Path(sys.executable).absolute()
         interpreter_target = interpreter_alias.resolve(strict=True)
         for own in (
@@ -1070,11 +1129,13 @@ def produce_release(source: Path, build: Path, version: str, output: Path) -> di
             release=True,
             release_source=source,
             release_files=hashes,
+            net=net,
+            net_sha256=net_sha256,
         )
         plan.verify()
         require(archive_inventory(plan) == hashes, "Archived source differs from source folder")
         dependencies = {}
-        for name in ("mouse.exe", *ORT_SHA256):
+        for name in ("mouse.exe", *ORT_SHA256, *([PLUGIN_LIBRARY] if plugin else [])):
             parsed = parse_pe((stage / name).read_bytes())
             dependencies[name] = parsed
             for imported in cast(list[str], parsed["imports"]):
@@ -1098,6 +1159,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     mode.add_argument("--source", type=Path)
     parser.add_argument("--build", type=Path)
     parser.add_argument("--version")
+    parser.add_argument("--net", type=Path, help=f"network to ship as {NET_NAME}")
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args(argv)
     try:
@@ -1107,9 +1169,12 @@ def main(argv: Sequence[str] | None = None) -> int:
                 args.build is not None and args.version is not None,
                 "Release requires --build and --version",
             )
-            result = produce_release(args.source, args.build, args.version, args.output)
+            result = produce_release(args.source, args.build, args.version, args.output, args.net)
         else:
-            require(args.build is None and args.version is None, "Build/version require --source")
+            require(
+                args.build is None and args.version is None and args.net is None,
+                "Build/version/net require --source",
+            )
             result = produce(args.config, args.output)
     except (OSError, ValueError, KeyError, zipfile.BadZipFile, zlib.error, EOFError) as error:
         print(f"Packaging error:{error}", file=sys.stderr)

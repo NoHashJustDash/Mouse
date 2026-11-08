@@ -11,6 +11,7 @@
 #include "engine/nn/policy_map.h"
 #include "engine/search/search.h"
 #include "tests/required_optional.h"
+#include "tests/search/lc0_parameters.h"
 
 namespace {
 using mouse::search::ProofOutcome;
@@ -81,6 +82,9 @@ struct Fixture {
         config.ram_limit_bytes = 8U << 20U;
         config.deterministic = true;
         config.terminal_proof = enabled;
+        // The recorded digests and visit expectations used Lc0's search parameters.
+        config.selection = mouse::test::kLc0Selection;
+        config.draw_rate = mouse::test::kLc0DrawRate;
         auto created = mouse::search::SearchEngine::create(config, attacks, backend);
         if (!created) throw std::runtime_error(created.error());
         engine = std::move(*created);
@@ -165,7 +169,7 @@ TEST_CASE("Proof retains exact context on reuse and resets with different histor
     REQUIRE(first.best_move);
     const auto retained = fixture.engine->advance(required_optional(first.best_move));
     REQUIRE(retained);
-    CHECK_FALSE(retained->discarded_context);
+    CHECK_FALSE(retained->reset_terminal_root);
     CHECK(fixture.engine->snapshot().proof.outcome == Loss);
     CHECK(fixture.engine->snapshot().proof.mate_upper_bound == 0);
     CHECK(fixture.run(256).reason == mouse::search::StopReason::Terminal);
@@ -236,8 +240,22 @@ TEST_CASE("Genuine root terminals expose proof while tree-twofold remains only h
     REQUIRE(result.best_move);
     const auto moved = repeated.engine->advance(required_optional(result.best_move));
     REQUIRE(moved);
-    CHECK(moved->discarded_context);
+    // Regression: tree twofolds used to discard the whole reused tree.
+    CHECK(moved->kept_nodes > 1);
+    const auto inherited = repeated.engine->snapshot().nodes;
+    CHECK(inherited > 1);
     CHECK(repeated.engine->snapshot().proof.outcome == Unknown);
+    // Continuing reverts twofolds whose first occurrence is now above the root;
+    // the root keeps exactly one own visit plus its children's visits.
+    const auto continued = repeated.run(inherited + 256);
+    CHECK(continued.reason == mouse::search::StopReason::NodeLimit);
+    CHECK(continued.info.nodes == inherited + 256);
+    CHECK(continued.info.inherited_visits <= inherited);
+    CHECK(continued.info.new_playouts == continued.info.nodes - continued.info.inherited_visits);
+    std::uint64_t child_visits = 0;
+    const auto roots = repeated.engine->root_moves();
+    for (const auto& row : std::span{roots.moves}.first(roots.size)) child_visits += row.visits;
+    CHECK(child_visits + 1 == continued.info.nodes);
 }
 TEST_CASE("A nonterminal forced loss and retained winning child keep real child visits",
           "[search][proof][proof-coordinator]") {

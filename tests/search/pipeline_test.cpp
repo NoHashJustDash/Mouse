@@ -136,6 +136,9 @@ struct Fixture {
         config.maximum_batch = 4;
         config.max_depth = 32;
         config.ram_limit_bytes = 8U << 20U;
+        // These tests hold a provider call open and count full batches behind it, so a batch must
+        // not leave early for an idle backend (lc0 ThreadIdlingThreshold).
+        config.gather.thread_idling_threshold = 2;
         auto created = mouse::search::SearchEngine::create(config, attacks, backend);
         if (!created) throw std::runtime_error(created.error());
         engine = std::move(*created);

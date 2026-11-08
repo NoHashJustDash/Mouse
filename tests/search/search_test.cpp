@@ -8,16 +8,20 @@
 #include <catch2/catch_message.hpp>
 #include <catch2/catch_test_macros.hpp>
 #include <cmath>
+#include <cstdint>
+#include <iostream>
 #include <limits>
 #include <stdexcept>
 #include <string>
 #include <string_view>
 #include <thread>
+#include <utility>
 
 #include "engine/chess/attacks.h"
 #include "engine/chess/movegen.h"
 #include "engine/nn/policy_map.h"
 #include "tests/required_optional.h"
+#include "tests/search/lc0_parameters.h"
 
 namespace {
 using mouse::tests::required_optional;
@@ -79,9 +83,11 @@ struct TestBackend final : public mouse::nn::Backend {
                 hash = (hash ^ plane.mask) * 1099511628211ULL;
                 hash = (hash ^ std::bit_cast<std::uint32_t>(plane.value)) * 1099511628211ULL;
             }
-            trace.at(rows++) = hash;
+            if (record) trace.at(rows) = hash;
+            ++rows;
         }
-        batches.at(batch_count++) = inputs.size();
+        if (record) batches.at(batch_count) = inputs.size();
+        ++batch_count;
         return {};
     }
     [[nodiscard]] const mouse::nn::ModelMetadata& metadata() const noexcept override {
@@ -95,6 +101,9 @@ struct TestBackend final : public mouse::nn::Backend {
     std::array<std::size_t, 8192> batches{};
     bool fail = false, invalid = false, cycle = false, dominant = false, long_error = false;
     bool white_advantage = false, vary_mlh = false, supplied_mlh = true, concentrated = false;
+    // Long searches beyond the fixed trace capacity turn recording off; tests that
+    // compare traces keep it on, so overflowing them still fails.
+    bool record = true;
     std::chrono::milliseconds delay{0};
 
     mouse::nn::ModelMetadata metadata_;
@@ -107,6 +116,9 @@ mouse::search::SearchConfig config() {
     result.ram_limit_bytes = 4U << 20U;
     result.max_depth = 32;
     result.deterministic = true;
+    // Expected values in this file were derived with Lc0's search parameters.
+    result.selection = mouse::test::kLc0Selection;
+    result.draw_rate = mouse::test::kLc0DrawRate;
     return result;
 }
 mouse::chess::Position position(const mouse::chess::AttackTables& attacks,
@@ -276,7 +288,7 @@ TEST_CASE("Search reuses only full root identities and verified continuations", 
             retained = statistics.moves.at(i).visits;
     const auto advanced = engine->advance(required_optional(initial.best_move));
     REQUIRE(advanced);
-    CHECK_FALSE(advanced->discarded_context);
+    CHECK_FALSE(advanced->reset_terminal_root);
     const auto next = run(*engine, retained + 20);
     CHECK(next.info.inherited_visits == retained);
     CHECK(next.info.new_playouts == 20);
@@ -289,7 +301,7 @@ TEST_CASE("Search reuses only full root identities and verified continuations", 
     CHECK(engine->snapshot().nodes == 0);
 }
 
-TEST_CASE("Contextual tree twofold draws are discarded on advance", "[search]") {
+TEST_CASE("Tree twofold draws survive advance and stale ones are reverted", "[search]") {
     const mouse::chess::AttackTables attacks;
     const auto root = position(attacks);
     TestBackend backend;
@@ -303,8 +315,24 @@ TEST_CASE("Contextual tree twofold draws are discarded on advance", "[search]") 
           mouse::chess::Move{mouse::chess::square(1, 0), mouse::chess::square(2, 2)});
     const auto moved = engine->advance(required_optional(result.best_move));
     REQUIRE(moved);
-    CHECK(moved->discarded_context);
-    CHECK(engine->snapshot().nodes == 0);
+    // Regression: 1.0.0 discarded the whole retained tree here (~40% of searches).
+    CHECK(moved->kept_nodes > 1);
+    const auto inherited = engine->snapshot().nodes;
+    CHECK(inherited > 1);
+    // Twofolds that repeated the old root now repeat game history above the new
+    // root; lc0 reverts them when selection reaches them.
+    mouse::search::SearchLimits limits;
+    limits.nodes = inherited + 64;
+    limits.log_search_stats = true;
+    const auto continued = engine->run(limits);
+    REQUIRE(continued);
+    CHECK(continued->stats.twofold_reverts > 0);
+    CHECK(continued->info.nodes == inherited + 64);
+    CHECK(continued->info.inherited_visits < inherited);
+    std::uint64_t child_visits = 0;
+    const auto roots = engine->root_moves();
+    for (std::size_t i = 0; i < roots.size; ++i) child_visits += roots.moves.at(i).visits;
+    CHECK(child_visits + 1 == continued->info.nodes);
 }
 
 TEST_CASE("Depth frontiers are heuristic and thaw when a retained child becomes root", "[search]") {
@@ -592,6 +620,32 @@ TEST_CASE("Known MLH changes uniform-Q allocation without changing the most-visi
             CHECK(chosen_visits >= stats->moves.at(i).visits);
     }
     CHECK(x.info.charged_bytes <= x.info.budget_bytes);
+}
+TEST_CASE("Draw-rate rescaling applies to network values entering the tree",
+          "[search][draw-rate]") {
+    const mouse::chess::AttackTables attacks;
+    const auto root = position(attacks);
+    TestBackend raw_backend, scaled_backend;
+    auto scaled = config();
+    scaled.draw_rate = {.target = 0.6, .reference = 0.5};
+    auto a = create(config(), attacks, raw_backend, root, history(root));
+    auto b = create(scaled, attacks, scaled_backend, root, history(root));
+    const auto x = run(*a, 1), y = run(*b, 1);
+    // The test network reports W 0.6 D 0.2 L 0.2 for the root.
+    float q = 0.4F, draw = 0.2F;
+    REQUIRE(mouse::search::rescale_wdl(q, draw, mouse::search::draw_rate_ratio(scaled.draw_rate),
+                                       1.4F));
+    CHECK(std::abs(std::abs(x.info.q) - 0.4) < 1e-6);
+    CHECK(std::abs(x.info.draw - 0.2) < 1e-6);
+    CHECK(std::abs(std::abs(y.info.q) - q) < 1e-6);
+    CHECK(std::abs(y.info.draw - draw) < 1e-6);
+    CHECK(y.info.draw > x.info.draw);
+    auto invalid = config();
+    invalid.draw_rate.reference = 0;
+    CHECK_FALSE(mouse::search::SearchEngine::create(invalid, attacks, raw_backend));
+    invalid = config();
+    invalid.moves_left.slope = -1;
+    CHECK_FALSE(mouse::search::SearchEngine::create(invalid, attacks, raw_backend));
 }
 TEST_CASE("An absent MLH preserves the disabled-feature Q plus U trace exactly",
           "[search][moves-left]") {
@@ -974,4 +1028,94 @@ TEST_CASE("Collision reservations drain after a provider exception before retain
     // Tree::reset rejects any surviving real or virtual reservation.
     REQUIRE(engine->set_position(root, history(root), false));
     CHECK(engine->snapshot().nodes == 0);
+}
+
+TEST_CASE("Root edges that cannot catch the best edge stop receiving visits",
+          "[search][catch-up]") {
+    // lc0 fd71a2d classic/search.cc PickNodesToExtendTask (1738-1747): with K playouts
+    // left, a root edge more than K visits behind the best edge is not considered.
+    const auto behind_visits = [](bool smart_pruning) {
+        const mouse::chess::AttackTables attacks;
+        const auto root = position(attacks);
+        TestBackend backend;
+        backend.concentrated = true;
+        auto engine = create(config(), attacks, backend, root, history(root));
+        static_cast<void>(run(*engine, 1000));
+        const auto before = engine->root_moves();
+        std::uint64_t best = 0, total = 0;
+        for (std::size_t i = 0; i < before.size; ++i) {
+            best = std::max(best, before.moves.at(i).visits);
+            total += before.moves.at(i).visits;
+        }
+        constexpr std::uint64_t kMore = 200;
+        mouse::search::SearchLimits limits;
+        limits.nodes = total + 1 + kMore;  // root visits: its children's plus its own
+        limits.smart_pruning = smart_pruning;
+        const auto searched = engine->run(limits);
+        if (!searched) throw std::runtime_error(searched.error());
+        const auto after = engine->root_moves();
+        std::uint64_t gained = 0, behind_edges = 0;
+        for (std::size_t i = 0; i < before.size; ++i) {
+            if (before.moves.at(i).visits + kMore >= best) continue;
+            ++behind_edges;
+            gained += after.moves.at(i).visits - before.moves.at(i).visits;
+        }
+        std::cout << "CATCH_UP smart_pruning=" << smart_pruning << " best=" << best
+                  << " behind_edges=" << behind_edges << " behind_visits_gained=" << gained << '\n';
+        return std::pair{behind_edges, gained};
+    };
+    const auto [edges, pruned] = behind_visits(true);
+    const auto [same_edges, unpruned] = behind_visits(false);
+    REQUIRE(edges == same_edges);
+    REQUIRE(edges > 0);
+    // Only the search's first walk can reach them: no backup has named a best edge
+    // yet (lc0's current_best_edge_ also starts empty).
+    CHECK(pruned <= config().maximum_batch);
+    CHECK(unpruned > pruned);
+}
+
+TEST_CASE("A gather cut short by its collision records still publishes every evaluated row",
+          "[search][halt-publish]") {
+    // A narrow tree fills the slot's collision records (lc0 MaxCollisionEvents), which
+    // ends the gather early through the slot's halt flag. The rows it already gathered
+    // must still be prepared for publication: skipping them published stale edge seeds
+    // from an earlier request, so nodes were expanded with another position's moves.
+    const mouse::chess::AttackTables attacks;
+    const auto root = position(attacks, "8/8/8/4k3/8/8/8/R3K3 w - - 0 1");
+    for (int round = 0; round < 3; ++round) {
+        INFO("round " << round);
+        TestBackend backend;
+        backend.concentrated = true;
+        backend.record = false;
+        auto selected = config();
+        selected.deterministic = false;
+        selected.threads = 2;
+        selected.maximum_batch = 64;
+        selected.ram_limit_bytes = 64U << 20U;
+        auto engine = create(selected, attacks, backend, root, history(root));
+        mouse::search::SearchLimits limits;
+        limits.nodes = 20000;
+        limits.log_search_stats = true;
+        const auto result = engine->run(limits);
+        if (!result) FAIL(result.error());
+        CHECK(result->stats.collisions > 0);
+        // Every node along the principal variation holds exactly its position's legal
+        // moves as edges, and each line move is legal where it is played.
+        auto board = root;
+        const auto line = engine->principal_variation();
+        REQUIRE(line.size > 1);
+        for (std::size_t ply = 0; ply < line.size; ++ply) {
+            const auto stats = engine->root_moves();
+            const auto legal = mouse::chess::legal_moves(board, attacks);
+            REQUIRE(std::find(legal.begin(), legal.end(), line.moves.at(ply)) != legal.end());
+            if (stats.size != 0) {
+                REQUIRE(stats.size == legal.size());
+                for (std::size_t i = 0; i < stats.size; ++i)
+                    REQUIRE(std::find(legal.begin(), legal.end(), stats.moves.at(i).move) !=
+                            legal.end());
+            }
+            REQUIRE(engine->advance(line.moves.at(ply)));
+            static_cast<void>(board.make_move(line.moves.at(ply), attacks));
+        }
+    }
 }

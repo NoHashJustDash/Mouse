@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 cmake_minimum_required(VERSION 3.28)
-foreach(required IN ITEMS MOUSE_PROGRAM MOUSE_PYTHON_EXECUTABLE MOUSE_SOURCE_DIRECTORY MOUSE_TEST_DIRECTORY)
+foreach(required IN ITEMS MOUSE_PROGRAM MOUSE_PYTHON_EXECUTABLE MOUSE_SOURCE_DIRECTORY MOUSE_TEST_DIRECTORY MOUSE_BACKENDS)
   if(NOT DEFINED ${required})
     message(FATAL_ERROR "${required} is required")
   endif()
@@ -14,6 +14,7 @@ execute_process(COMMAND "${MOUSE_PYTHON_EXECUTABLE}" -I
   --failure-weights "${MOUSE_SOURCE_DIRECTORY}/tests/data/backend/search-nonfinite.onnx"
   --spec-dir "${MOUSE_SOURCE_DIRECTORY}/tests/data/uci/protocol-v1"
   --output "${MOUSE_TEST_DIRECTORY}/${unique}.json"
+  --backends "${MOUSE_BACKENDS}"
   RESULT_VARIABLE result OUTPUT_VARIABLE output ERROR_VARIABLE error TIMEOUT 1400)
 if(NOT result EQUAL 0)
   message(FATAL_ERROR "UCI protocol gate failed ${result}: ${output}

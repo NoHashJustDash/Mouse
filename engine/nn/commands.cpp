@@ -78,7 +78,7 @@ bool has_magic(std::span<const std::byte> bytes, std::string_view text) {
 Result<BackendCommand> parse_backend_command(BackendCommandKind kind,
                                              std::span<const std::string_view> arguments) {
     if (kind != BackendCommandKind::Evaluate && kind != BackendCommandKind::Benchmark &&
-        kind != BackendCommandKind::Configuration)
+        kind != BackendCommandKind::Configuration && kind != BackendCommandKind::BuildCache)
         return tl::unexpected(std::string{"Invalid backend command kind"});
     BackendCommand command;
     std::set<std::string_view> seen;
@@ -95,14 +95,20 @@ Result<BackendCommand> parse_backend_command(BackendCommandKind kind,
         if (option == "--weights") {
             command.backend.model_path = std::filesystem::path{value};
         } else if (option == "--backend") {
-            if (value == "cpu")
-                command.backend.kind = BackendKind::Cpu;
+            if (value == "cpu") command.backend.kind = BackendKind::Cpu;
+#if MOUSE_DIRECTML
+            else if (value == "directml")
+                command.backend.kind = BackendKind::DirectMl;
+            else
+                return tl::unexpected(std::string{"--backend must be cpu or directml"});
+#else
             else if (value == "cuda")
                 command.backend.kind = BackendKind::Cuda;
             else if (value == "tensorrt")
                 command.backend.kind = BackendKind::TensorRt;
             else
                 return tl::unexpected(std::string{"--backend must be cpu, cuda or tensorrt"});
+#endif
         } else if (option == "--precision") {
             if (value == "fp32")
                 command.backend.precision = ComputePrecision::Float32;
@@ -137,7 +143,12 @@ Result<BackendCommand> parse_backend_command(BackendCommandKind kind,
             const auto parsed = number(value, "--workspace-mb", {.minimum = 1, .maximum = 16384});
             if (!parsed) return tl::unexpected(parsed.error());
             command.backend.workspace_bytes = *parsed * 1024U * 1024U;
-        } else if (option == "--nncache-mb" && kind != BackendCommandKind::Benchmark) {
+        } else if (option == "--deterministic-compute" && kind == BackendCommandKind::BuildCache) {
+            if (value != "true" && value != "false")
+                return tl::unexpected(std::string{"--deterministic-compute must be true or false"});
+            command.backend.deterministic_compute = value == "true";
+        } else if (option == "--nncache-mb" && kind != BackendCommandKind::Benchmark &&
+                   kind != BackendCommandKind::BuildCache) {
             const auto parsed = number(value, "--nncache-mb", {.minimum = 0, .maximum = 16384});
             if (!parsed) return tl::unexpected(parsed.error());
             command.cache_bytes = static_cast<std::size_t>(*parsed * 1024U * 1024U);
@@ -169,6 +180,10 @@ Result<BackendCommand> parse_backend_command(BackendCommandKind kind,
     if (kind == BackendCommandKind::Evaluate && command.inputs_path.empty()) {
         return tl::unexpected(std::string{"backend-eval requires --inputs"});
     }
+    if (kind == BackendCommandKind::BuildCache &&
+        (command.backend.kind != BackendKind::TensorRt || !seen.contains("--cache-dir")))
+        return tl::unexpected(
+            std::string{"build-tensorrt-cache requires --backend tensorrt and --cache-dir"});
     if (command.start_batch_size > command.max_batch_size) {
         return tl::unexpected(std::string{"Start batch size exceeds maximum"});
     }

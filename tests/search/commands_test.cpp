@@ -134,7 +134,7 @@ TEST_CASE("Standalone search root FPU settings share the UCI defaults and explic
     const auto defaults = parse({"--weights", "model", "--backend", "cpu", "--precision", "fp32"});
     REQUIRE(defaults);
     CHECK(defaults->config.selection.root_fpu_strategy == RootFpuStrategy::Same);
-    CHECK(defaults->config.selection.fpu_reduction == 0.33);
+    CHECK(defaults->config.selection.fpu_reduction == 0.323);
     CHECK(defaults->config.selection.root_fpu == 1.0);
     for (const auto& pair : {std::pair{"same", RootFpuStrategy::Same},
                              std::pair{"reduction", RootFpuStrategy::Reduction},
@@ -145,7 +145,7 @@ TEST_CASE("Standalone search root FPU settings share the UCI defaults and explic
         REQUIRE(configured);
         CHECK(configured->config.selection.root_fpu_strategy == pair.second);
         CHECK(configured->config.selection.root_fpu == -0.5);
-        CHECK(configured->config.selection.fpu_reduction == 0.33);
+        CHECK(configured->config.selection.fpu_reduction == 0.323);
     }
     for (const auto& pair :
          {std::pair{"--fpu-strategy-at-root", "automatic"}, std::pair{"--fpu-value-at-root", "nan"},

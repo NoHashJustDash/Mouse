@@ -174,3 +174,35 @@ TEST_CASE("Dense expansion preserves masks and validates its boundary", "[nn][en
     (*encoded)[0].value = std::numeric_limits<float>::quiet_NaN();
     CHECK_FALSE(expand_planes(*encoded, dense).has_value());
 }
+
+TEST_CASE("Dense expansion writes every square exactly as its mask and value define",
+          "[nn][encoder]") {
+    // The expansion fills whole planes and sets only occupied squares; this pins it to
+    // the per-square definition for empty, full, sparse and dense masks.
+    std::uint64_t state = 0x9E3779B97F4A7C15ULL;
+    const auto next = [&state] {
+        state ^= state << 13U;
+        state ^= state >> 7U;
+        state ^= state << 17U;
+        return state;
+    };
+    for (int round = 0; round < 64; ++round) {
+        InputPlanes planes{};
+        for (std::size_t p = 0; p < planes.size(); ++p) {
+            const auto kind = next() % 5U;
+            planes[p].mask = kind == 0   ? 0
+                             : kind == 1 ? ~std::uint64_t{0}
+                             : kind == 2 ? next() & next() & next()
+                                         : next();
+            planes[p].value = static_cast<float>(next() % 200U) / 2.0F - 25.0F;
+        }
+        std::array<float, kInputElementCount> dense{};
+        dense.fill(std::numeric_limits<float>::quiet_NaN());
+        REQUIRE(expand_planes(planes, dense).has_value());
+        for (std::size_t p = 0; p < planes.size(); ++p)
+            for (unsigned square = 0; square < 64; ++square) {
+                const bool set = (planes[p].mask & (std::uint64_t{1} << square)) != 0;
+                REQUIRE(dense[p * 64 + square] == (set ? planes[p].value : 0.0F));
+            }
+    }
+}

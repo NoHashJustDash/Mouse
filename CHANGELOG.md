@@ -6,6 +6,39 @@ and Semantic Versioning.
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-11-07
+
+Mouse now ships with its own network, M1.5.
+
+### Added
+
+- The M1.5 network, with the `mouse_moe_trt` TensorRT plugin that runs it.
+- Syzygy tablebase probing, vendored from Lc0.
+- Lc0's `selfplay` and `dag-preview` modes, and its `policyhead` and `valuehead` modes.
+- Lc0's gather, parallel picking, solid tree, contempt, score, temperature, noise, time and
+  logging options.
+- A DirectML backend for AMD, Intel and other DirectX 12 GPUs, in separate builds.
+- `onnx2leela`, which wraps an ONNX network as a Leela weights file.
+- An additional permission under GPL section 7 for combining Mouse with NVIDIA's CUDA, cuDNN
+  and TensorRT libraries, in `docs/NVIDIA_PERMISSION.md`.
+- `docs/NETWORK.md`: the network's licence, the Lc0 training-data notice and the method used
+  to relabel that data.
+
+### Changed
+
+- CPuct, FpuValue, PolicyTemperature, WDLDrawRateTarget and WDLDrawRateReference now default
+  to values tuned for M1.5, which beat lc0's values by +45.7 ± 15.5 Elo in an SPRT.
+- Missing TensorRT engines are built in a helper process.
+
+### Fixed
+
+- Mouse kept discarding its tree before about 40% of searches when the tree held a repeated
+  position; it now keeps the tree as lc0 does.
+- Root moves that can no longer become best are pruned as lc0 prunes them.
+- 1 ms waits now work when a GUI starts Mouse without a window.
+- Batch sizing no longer charges each row a whole root path.
+- Every evaluated row is published after a halted gather.
+
 ## [1.0.0] - 2026-10-27
 
 First public release: Mouse plays Lc0's T1-256x10-distilled-swa-2432500 network

@@ -13,10 +13,15 @@
 #include <stdexcept>
 #include <string_view>
 #include <utility>
+#include <vector>
 
 #include "engine/nn/backend_gpu.h"
 #include "engine/nn/model_artifact.h"
+#include "engine/nn/tensorrt_builder.h"
 #include "engine/util/sha256.h"
+#if MOUSE_DIRECTML
+#include <dml_provider_factory.h>
+#endif
 
 namespace mouse::nn {
 namespace {
@@ -51,13 +56,25 @@ const char* provider_label(BackendKind kind) noexcept {
             return "CUDA";
         case BackendKind::TensorRt:
             return "TensorRT";
+        case BackendKind::DirectMl:
+            return "DirectML";
     }
     return "unknown";
 }
+// GPU kinds whose inputs and outputs live in CUDA device buffers (DirectML copies
+// host-bound tensors itself).
+bool cuda_io(BackendKind kind) noexcept {
+    return kind == BackendKind::Cuda || kind == BackendKind::TensorRt;
+}
 BackendConfig validated(BackendConfig config) {
     if (config.kind != BackendKind::Cpu && config.kind != BackendKind::Cuda &&
-        config.kind != BackendKind::TensorRt)
+        config.kind != BackendKind::TensorRt && config.kind != BackendKind::DirectMl)
         throw std::runtime_error("Invalid backend provider selection");
+#if !MOUSE_DIRECTML
+    if (config.kind == BackendKind::DirectMl)
+        throw std::runtime_error(
+            "The directml backend needs a DirectML build of Mouse (CMake preset windows-dml)");
+#endif
     if (config.precision != ComputePrecision::Float32 &&
         config.precision != ComputePrecision::Float16)
         throw std::runtime_error("Invalid backend precision selection");
@@ -118,6 +135,27 @@ struct Session {
     std::optional<std::size_t> batch;
     SessionOwner value;
 };
+// ORT 1.22 TensorRT keeps its "trt.plugins" custom op domain in function-local statics of
+// CreateTensorRTCustomOpDomainList and hands the same objects to every session, yet
+// ~TensorrtExecutionProvider deletes them (ReleaseTensorRTCustomOpDomainList; still so in
+// v1.23.0, made a no-op upstream later). Every TensorRT session after the first one ended
+// then reads freed ops, and a net with a trt.plugins node (the Mouse-MoE expert plugin)
+// crashes in its next TensorRT build. So TensorRT sessions are never released: a finished
+// TensorRT backend leaves them, with the environment, GPU libraries and runtime they use,
+// resident until the process exits.
+struct ResidentTensorRt {
+    RuntimeLibrary runtime;
+    std::unique_ptr<detail::GpuDependencies> dependencies;
+    Owner<OrtEnv, decltype(OrtApi::ReleaseEnv)> env;
+    std::vector<Session> sessions;
+};
+void keep_resident(ResidentTensorRt resident) {
+    // Never destroyed, not even at exit: that would run the same release again.
+    static auto* const mutex = new std::mutex;
+    static auto* const kept = new std::vector<ResidentTensorRt>;
+    const std::lock_guard lock(*mutex);
+    kept->push_back(std::move(resident));
+}
 enum class BufferLocation : std::uint8_t { Cpu, Pinned, Device };
 class BufferPool {
    public:
@@ -219,8 +257,45 @@ class OrtBackend final : public Backend {
           api_(runtime_.api()),
           config_(std::move(config)),
           model_(std::move(model)),
-          gpu_dependencies_(config_),
+          gpu_dependencies_(std::make_unique<detail::GpuDependencies>(config_)),
           env_(nullptr, api_.ReleaseEnv) {
+        try {
+            construct();
+        } catch (...) {
+            retain_tensor_rt();
+            throw;
+        }
+    }
+    ~OrtBackend() override { retain_tensor_rt(); }
+    OrtBackend(const OrtBackend&) = delete;
+    OrtBackend& operator=(const OrtBackend&) = delete;
+    OrtBackend(OrtBackend&&) = delete;
+    OrtBackend& operator=(OrtBackend&&) = delete;
+
+   private:
+    // Releases what the sessions do not need, then keeps them (see ResidentTensorRt).
+    // A failed push terminates: releasing them instead would bring back the crash.
+    void retain_tensor_rt() noexcept {
+        if (config_.kind != BackendKind::TensorRt || sessions_.empty()) return;
+        bindings_.clear();
+        views_.clear();
+        transfer_.reset();
+        device_pool_.reset();
+        pool_.reset();
+        keep_resident({.runtime = std::move(runtime_),
+                       .dependencies = std::move(gpu_dependencies_),
+                       .env = std::move(env_),
+                       .sessions = std::move(sessions_)});
+        sessions_.clear();
+    }
+    void construct() {
+        // Checked here, not in validated(), so TensorRT cache-path errors read the same
+        // in every build.
+#if MOUSE_DIRECTML
+        if (cuda_io(config_.kind))
+            throw std::runtime_error(
+                "This DirectML build of Mouse runs the directml and cpu backends only");
+#endif
         OrtEnv* env = nullptr;
         check(api_, api_.CreateEnv(ORT_LOGGING_LEVEL_WARNING, "Mouse", &env),
               "Create ORT environment");
@@ -229,12 +304,32 @@ class OrtBackend final : public Backend {
         const auto identity = detail::backend_identity(config_, info_, gpu_fingerprint_);
         info_.cache_namespace =
             mouse::sha256(std::as_bytes(std::span{identity.data(), identity.size()}));
+        const auto bucket_identity = [&identity](std::size_t batch) {
+            return identity + "fixed_batch=" + std::to_string(batch);
+        };
+        // With a builder, missing engines are compiled in a child process and this one only
+        // loads committed caches: a compiling session costs GPU builders' RAM, and releasing
+        // it is unsafe here (ResidentTensorRt).
+        if (config_.kind == BackendKind::TensorRt && !config_.tensorrt_builder.empty() &&
+            !std::ranges::all_of(config_.batch_buckets, [&](std::size_t batch) {
+                return detail::TensorRtCache::exists(config_.cache_directory,
+                                                     bucket_identity(batch));
+            })) {
+            if (config_.initialization_progress)
+                config_.initialization_progress(
+                    "TensorRT cold startup: building engines in a helper process");
+            detail::build_tensorrt_cache(config_);
+        }
         if (config_.kind != BackendKind::Cpu) {
             for (const auto batch : config_.batch_buckets) {
                 std::unique_ptr<detail::TensorRtCache> cache;
                 if (config_.kind == BackendKind::TensorRt) {
-                    cache = std::make_unique<detail::TensorRtCache>(
-                        config_.cache_directory, identity + "fixed_batch=" + std::to_string(batch));
+                    cache = std::make_unique<detail::TensorRtCache>(config_.cache_directory,
+                                                                    bucket_identity(batch));
+                    if (!cache->reusable() && !config_.tensorrt_builder.empty())
+                        throw std::runtime_error(
+                            "TensorRT build helper left no committed engine for bucket " +
+                            std::to_string(batch));
                     if (!cache->reusable() && config_.initialization_progress)
                         config_.initialization_progress("TensorRT cold startup: building bucket " +
                                                         std::to_string(batch));
@@ -246,32 +341,20 @@ class OrtBackend final : public Backend {
             create_session(std::nullopt, nullptr);
         }
         initialize_buffers_and_warm();
-        const bool built = std::ranges::any_of(
-            caches_, [](const auto& cache) { return cache && !cache->reusable(); });
+        if (config_.kind == BackendKind::DirectMl) detail::require_bundled_directml(config_);
         if (require(mouse::sha256_file(config_.model_path)) != info_.onnx_sha256)
             throw std::runtime_error("ONNX artifact changed during backend construction");
         for (auto& cache : caches_)
             if (cache) cache->commit();
-        if (built) {
-            // ORT v1.22 TensorRT keeps builders/parsers in the compiling provider.
-            // Discard that provider after committing its verified EPContext;
-            // execution-only sessions need no builder and retain much less RAM.
-            bindings_.clear();
-            views_.clear();
-            transfer_.reset();
-            device_pool_.reset();
-            pool_.reset();
-            sessions_.clear();
-            for (std::size_t i = 0; i < config_.batch_buckets.size(); ++i)
-                create_session(config_.batch_buckets[i], caches_.at(i).get());
-            initialize_buffers_and_warm();
-            for (const auto& cache : caches_) cache->commit();
-        }
+        // A cold start keeps its compiling sessions (with their builders) for this process
+        // rather than reloading the committed EPContext: releasing a TensorRT session is
+        // unsafe (ResidentTensorRt). The next start loads the committed cache.
         caches_.clear();  // Release startup locks only after every bucket is warm.
         std::vector<char>{}.swap(
             model_);  // Immutable identity retains its hash, not the input snapshot.
     }
 
+   public:
     Result<void> evaluate(std::span<const InputPlanes> inputs,
                           std::span<NNOutput> outputs) override {
         try {
@@ -320,15 +403,16 @@ class OrtBackend final : public Backend {
         const auto maximum = config_.batch_buckets.back();
         pool_ = std::make_unique<BufferPool>(
             api_, *sessions_.front().value, maximum,
-            config_.kind == BackendKind::Cpu ? BufferLocation::Cpu : BufferLocation::Pinned,
+            cuda_io(config_.kind) ? BufferLocation::Pinned : BufferLocation::Cpu,
             config_.device_id);
-        if (config_.kind != BackendKind::Cpu) {
+        if (cuda_io(config_.kind)) {
             device_pool_ = std::make_unique<BufferPool>(api_, *sessions_.front().value, maximum,
                                                         BufferLocation::Device, config_.device_id);
             transfer_ = std::make_unique<detail::GpuTransfer>(config_);
         }
         // Views carry only shapes/OrtValue metadata, all sharing this one pool.
-        // GPU sessions have fixed shapes and stable addresses for CUDA replay.
+        // GPU sessions have fixed shapes and stable addresses for CUDA replay;
+        // DirectML binds the same fixed host addresses once per bucket.
         // CPU retains dynamic execution of the exact requested batch size.
         if (config_.kind != BackendKind::Cpu) {
             for (const auto batch : config_.batch_buckets) create_views(batch);
@@ -355,6 +439,12 @@ class OrtBackend final : public Backend {
             info_.provider = "CPUExecutionProvider";
             info_.device_name = "CPU";
             info_.device_uuid = "cpu";
+        } else if (config_.kind == BackendKind::DirectMl) {
+            auto adapter = detail::query_directml_adapter(config_);
+            info_ = std::move(adapter.identity.info);
+            gpu_fingerprint_ = std::move(adapter.identity.runtime_fingerprint);
+            directml_adapter_ = adapter.enum_adapters_index;
+            info_.provider = "DmlExecutionProvider";
         } else {
             auto identity = detail::query_gpu_identity(config_);
             info_ = std::move(identity.info);
@@ -373,6 +463,23 @@ class OrtBackend final : public Backend {
         check(api_, api_.AddSessionConfigEntry(&options, "session.disable_cpu_ep_fallback", "1"),
               "Disable CPU execution fallback");
         const auto device = std::to_string(config_.device_id);
+        if (config_.kind == BackendKind::DirectMl) {
+#if MOUSE_DIRECTML
+            // ORT v1.22.0 DirectML provider: memory patterns are unsupported and execution
+            // must be sequential (set in create_session). It takes the EnumAdapters index.
+            check(api_, api_.DisableMemPattern(&options), "Disable memory patterns for DirectML");
+            const void* raw = nullptr;
+            check(api_, api_.GetExecutionProviderApi("DML", ORT_API_VERSION, &raw),
+                  "Load the DirectML provider API");
+            const auto* directml = static_cast<const OrtDmlApi*>(raw);
+            check(api_,
+                  directml->SessionOptionsAppendExecutionProvider_DML(&options, directml_adapter_),
+                  "Select DirectML provider");
+            return;
+#else
+            throw std::logic_error("DirectML provider in a build without DirectML");
+#endif
+        }
         if (config_.kind == BackendKind::Cuda) {
             OrtCUDAProviderOptionsV2* raw = nullptr;
             check(api_, api_.CreateCUDAProviderOptions(&raw), "Create CUDA provider options");
@@ -404,38 +511,47 @@ class OrtBackend final : public Backend {
             const auto timing = utf8(cache->directory() / "timing");
             const auto maximum = std::to_string(*fixed);
             const std::string maximum_shape = "planes:" + maximum + "x112x8x8";
-            const std::array keys{"device_id",
-                                  "trt_fp16_enable",
-                                  "trt_max_workspace_size",
-                                  "trt_engine_cache_enable",
-                                  "trt_engine_cache_path",
-                                  "trt_engine_cache_prefix",
-                                  "trt_timing_cache_enable",
-                                  "trt_timing_cache_path",
-                                  "trt_min_subgraph_size",
-                                  "trt_profile_min_shapes",
-                                  "trt_profile_opt_shapes",
-                                  "trt_profile_max_shapes",
-                                  "trt_dump_ep_context_model",
-                                  "trt_ep_context_file_path",
-                                  "trt_ep_context_embed_mode",
-                                  "trt_cuda_graph_enable"};
-            const std::array values{device.c_str(),
-                                    config_.precision == ComputePrecision::Float16 ? "1" : "0",
-                                    workspace.c_str(),
-                                    "1",
-                                    engine.c_str(),
-                                    "m",
-                                    "1",
-                                    timing.c_str(),
-                                    "1",
-                                    maximum_shape.c_str(),
-                                    maximum_shape.c_str(),
-                                    maximum_shape.c_str(),
-                                    cache->reusable() ? "0" : "1",
-                                    context.c_str(),
-                                    "0",
-                                    "1"};
+            std::vector<const char*> keys{"device_id",
+                                          "trt_fp16_enable",
+                                          "trt_max_workspace_size",
+                                          "trt_engine_cache_enable",
+                                          "trt_engine_cache_path",
+                                          "trt_engine_cache_prefix",
+                                          "trt_timing_cache_enable",
+                                          "trt_timing_cache_path",
+                                          "trt_min_subgraph_size",
+                                          "trt_profile_min_shapes",
+                                          "trt_profile_opt_shapes",
+                                          "trt_profile_max_shapes",
+                                          "trt_dump_ep_context_model",
+                                          "trt_ep_context_file_path",
+                                          "trt_ep_context_embed_mode",
+                                          "trt_cuda_graph_enable"};
+            std::vector<const char*> values{
+                device.c_str(),
+                config_.precision == ComputePrecision::Float16 ? "1" : "0",
+                workspace.c_str(),
+                "1",
+                engine.c_str(),
+                "m",
+                "1",
+                timing.c_str(),
+                "1",
+                maximum_shape.c_str(),
+                maximum_shape.c_str(),
+                maximum_shape.c_str(),
+                cache->reusable() ? "0" : "1",
+                context.c_str(),
+                "0",
+                "1"};
+            // Mouse-MoE nets use the fused expert plugin; ORT registers its creator
+            // with TensorRT from this absolute path (no search path is involved).
+            const auto plugin = detail::trt_moe_plugin(config_);
+            const auto plugin_path = plugin ? utf8(*plugin) : std::string{};
+            if (plugin) {
+                keys.push_back("trt_extra_plugin_lib_paths");
+                values.push_back(plugin_path.c_str());
+            }
             check(api_,
                   api_.UpdateTensorRTProviderOptions(provider.get(), keys.data(), values.data(),
                                                      keys.size()),
@@ -482,11 +598,12 @@ class OrtBackend final : public Backend {
         const auto metadata = require(read_model_metadata(api_, *session.value, fixed));
         if (config_.precision == ComputePrecision::Float32 && metadata.precision != "fp32")
             throw std::runtime_error("Float32 precision requires an fp32 ONNX graph");
-        if (config_.kind == BackendKind::Cuda && config_.precision == ComputePrecision::Float16 &&
-            metadata.precision != "fp16")
-            throw std::runtime_error(
-                "CUDA float16 precision requires an fp16 ONNX graph; CUDA has no implicit FP16 "
-                "conversion");
+        if ((config_.kind == BackendKind::Cuda || config_.kind == BackendKind::DirectMl) &&
+            config_.precision == ComputePrecision::Float16 && metadata.precision != "fp16")
+            throw std::runtime_error(std::string{provider_label(config_.kind)} +
+                                     " float16 precision requires an fp16 ONNX graph; " +
+                                     provider_label(config_.kind) +
+                                     " has no implicit FP16 conversion");
         if (sessions_.empty())
             metadata_ = metadata;
         else if (metadata_ != metadata)
@@ -511,7 +628,7 @@ class OrtBackend final : public Backend {
         views.policy = tensor(api_, buffer, buffer.policy().first(batch * 1858), policy_shape);
         views.wdl = tensor(api_, buffer, buffer.wdl().first(batch * 3), wdl_shape);
         views.mlh = tensor(api_, buffer, buffer.mlh().first(batch), mlh_shape);
-        if (device_pool_) bind(*bindings_.at(views_.size()), views);
+        if (config_.kind != BackendKind::Cpu) bind(*bindings_.at(views_.size()), views);
         views_.push_back(std::move(views));
     }
     void bind(OrtIoBinding& binding, const Views& views) {
@@ -530,9 +647,14 @@ class OrtBackend final : public Backend {
                 : batch - 1;
         auto& session = sessions_.at(gpu ? index : 0);
         auto* binding = bindings_.at(gpu ? index : 0).get();
-        if (gpu) {
+        if (cuda_io(config_.kind)) {
             transfer_->upload(device_pool_->input().first(batch * kInputElementCount),
                               pool_->input().first(batch * kInputElementCount));
+        } else if (gpu) {
+            // ORT v1.22.0 IOBinding::BindInput copies a host input to the provider's device
+            // when it is bound (session/IOBinding.cc), so DirectML rebinds the refreshed input.
+            check(api_, api_.BindInput(binding, "planes", views_.at(index).input.get()),
+                  "Bind input");
         } else
             bind(*binding, views_.at(index));
         // Device bindings never change. Explicit copies refresh the same addresses
@@ -540,7 +662,7 @@ class OrtBackend final : public Backend {
         check(api_, api_.RunWithBinding(session.value.get(), nullptr, binding),
               "Run selected provider");
         check(api_, api_.SynchronizeBoundOutputs(binding), "Synchronize provider outputs");
-        if (gpu) {
+        if (cuda_io(config_.kind)) {
             transfer_->download(pool_->policy().first(batch * 1858),
                                 device_pool_->policy().first(batch * 1858));
             transfer_->download(pool_->wdl().first(batch * 3),
@@ -560,11 +682,12 @@ class OrtBackend final : public Backend {
     const OrtApi& api_;
     BackendConfig config_;
     std::vector<char> model_;
-    detail::GpuDependencies gpu_dependencies_;
+    std::unique_ptr<detail::GpuDependencies> gpu_dependencies_;
     Owner<OrtEnv, decltype(OrtApi::ReleaseEnv)> env_;
     BackendInfo info_;
     ModelMetadata metadata_;
     std::string gpu_fingerprint_;
+    int directml_adapter_ = -1;  // IDXGIFactory::EnumAdapters index
     std::vector<std::unique_ptr<detail::TensorRtCache>> caches_;
     std::vector<Session> sessions_;
     std::unique_ptr<BufferPool> pool_;
@@ -577,6 +700,7 @@ class OrtBackend final : public Backend {
 }  // namespace
 Result<std::size_t> recommended_minibatch(const BackendConfig& config) {
     if (config.kind == BackendKind::Cpu) return std::size_t{64};
+    if (config.kind == BackendKind::DirectMl) return kDirectMlMinibatch;
     try {
         const auto multiprocessors = detail::query_gpu_multiprocessors(config);
         return std::min<std::size_t>(1024, 2 * multiprocessors);

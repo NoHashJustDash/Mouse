@@ -5,6 +5,7 @@
 #include <bit>
 #include <cassert>
 #include <cmath>
+#include <cstring>
 #include <iterator>
 #include <limits>
 #include <new>
@@ -121,11 +122,13 @@ Hash128 LegalCache::hash(const InputPlanes& input, const PolicyIndices& policy) 
     constexpr auto bytes = 16 + 112 * 12 + 8 + 2 * chess::MoveList::kCapacity;
     std::array<std::byte, bytes> key{};
     std::size_t used = 0;
+    // The low `count` bytes of `value`, least significant first: on a little-endian
+    // host that is its first `count` bytes in memory. The size above bounds `used`.
+    static_assert(std::endian::native == std::endian::little);
     const auto append = [&](std::uint64_t value, std::size_t count) {
-        for (std::size_t i = 0; i < count; ++i) {
-            key.at(used++) = static_cast<std::byte>(value & 0xffU);
-            value >>= 8;
-        }
+        assert(count <= sizeof value && used + count <= key.size());
+        std::memcpy(key.data() + used, &value, count);
+        used += count;
     };
     for (const auto word : namespace_) append(word, 8);
     // Classical 112-plane layout: 8 frames of 13 planes (current first), then
@@ -157,10 +160,13 @@ Result<std::optional<LegalOutput>> LegalCache::lookup(const InputPlanes& input,
         return tl::unexpected(std::string{"Legal cache input values must be finite"});
     const auto valid = validate_policy_indices(policy);
     if (!valid) return tl::unexpected(valid.error());
+    // The key depends only on the input and the immutable identity, so concurrent
+    // lookups hash before taking the lock.
+    const auto key = hash(input, policy);
     const std::lock_guard lock(mutex_);
     if (storage_) {
         auto& data = *storage_;
-        const auto entry = find(data, hash(input, policy));
+        const auto entry = find(data, key);
         if (entry != data.entries.end()) {
             if (entry->logits.size() != policy.size)
                 return tl::unexpected(std::string{"Legal cache fingerprint shape collision"});
@@ -184,11 +190,11 @@ Result<void> LegalCache::insert(const InputPlanes& input, const PolicyIndices& p
     if (!valid) return valid;
     valid = validate_legal_output(output, policy.size);
     if (!valid) return valid;
+    const auto key = hash(input, policy);
     const std::lock_guard lock(mutex_);
     if (!storage_) return {};
     auto& data = *storage_;
     const auto before = stats_;
-    const auto key = hash(input, policy);
     const auto found = find(data, key);
     const auto logits = std::span{output.logits}.first(policy.size);
     if (found != data.entries.end()) {

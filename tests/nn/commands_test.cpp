@@ -9,10 +9,12 @@
 #include <cstdint>
 #include <limits>
 #include <span>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <vector>
 
+#include "engine/nn/tensorrt_builder.h"
 #include "engine/util/sha256.h"
 
 namespace {
@@ -65,10 +67,23 @@ TEST_CASE("Backend commands require explicit model provider and precision", "[nn
     CHECK(evaluation->backend.precision == mouse::nn::ComputePrecision::Float32);
     CHECK(evaluation->backend.batch_buckets == std::vector<std::size_t>{1, 4, 8});
     CHECK(evaluation->cache_bytes == 1048576);
+#if MOUSE_DIRECTML
+    const auto benchmark =
+        parse("--weights model --backend directml --precision fp16", BackendCommandKind::Benchmark);
+    REQUIRE(benchmark.has_value());
+    CHECK(benchmark->backend.kind == mouse::nn::BackendKind::DirectMl);
+    CHECK_FALSE(
+        parse("--weights model --backend tensorrt --precision fp16", BackendCommandKind::Benchmark)
+            .has_value());
+#else
     const auto benchmark =
         parse("--weights model --backend tensorrt --precision fp16 --cache-dir cache",
               BackendCommandKind::Benchmark);
     REQUIRE(benchmark.has_value());
+    CHECK_FALSE(
+        parse("--weights model --backend directml --precision fp16", BackendCommandKind::Benchmark)
+            .has_value());
+#endif
     CHECK(benchmark->start_batch_size == 1);
     CHECK(benchmark->max_batch_size == 1024);
     CHECK(benchmark->batch_step == 1);
@@ -229,3 +244,70 @@ TEST_CASE("Backend output transport preserves all bits across rows and rejects m
         CHECK(invalid.error().find("missing MLH") != std::string::npos);
     }
 }
+
+#if !MOUSE_DIRECTML
+TEST_CASE("The TensorRT build helper command needs TensorRT and a cache directory",
+          "[nn][commands][tensorrt-builder]") {
+    const auto built = parse(
+        "--weights C:/m.onnx --backend tensorrt --precision fp16 --buckets 1,8,32,96 "
+        "--cache-dir C:/cache --device 1 --cpu-threads 2 --workspace-mb 512 "
+        "--deterministic-compute true",
+        BackendCommandKind::BuildCache);
+    REQUIRE(built.has_value());
+    CHECK(built->backend.deterministic_compute);
+    CHECK(built->backend.workspace_bytes == 512ULL << 20U);
+    CHECK_FALSE(parse("--weights m.onnx --backend tensorrt --precision fp16",
+                      BackendCommandKind::BuildCache));
+    CHECK_FALSE(parse("--weights m.onnx --backend cuda --precision fp16 --cache-dir C:/cache",
+                      BackendCommandKind::BuildCache));
+    CHECK_FALSE(
+        parse("--weights m.onnx --backend tensorrt --precision fp16 --cache-dir C:/c "
+              "--nncache-mb 1",
+              BackendCommandKind::BuildCache));
+    CHECK_FALSE(
+        parse("--weights m.onnx --backend tensorrt --precision fp16 --cache-dir C:/c "
+              "--deterministic-compute yes",
+              BackendCommandKind::BuildCache));
+    CHECK_FALSE(
+        parse("--weights m.onnx --backend tensorrt --precision fp16 --cache-dir C:/c "
+              "--deterministic-compute true",
+              BackendCommandKind::Evaluate));
+}
+TEST_CASE("The TensorRT build helper receives every cache identity field",
+          "[nn][commands][tensorrt-builder]") {
+    mouse::nn::BackendConfig config;
+    config.kind = mouse::nn::BackendKind::TensorRt;
+    config.precision = mouse::nn::ComputePrecision::Float32;
+    config.model_path = "C:/nets/a net.onnx";
+    config.cache_directory = "C:/cache dir/Mouse";
+    config.gpu_dll_directories = {"C:/Program Files/CUDA/bin", "C:/sdk/trt/lib"};
+    config.batch_buckets = {1, 8, 32, 128};
+    config.device_id = 2;
+    config.cpu_threads = 3;
+    config.workspace_bytes = 768ULL << 20U;
+    config.deterministic_compute = true;
+    const auto arguments = mouse::nn::detail::tensorrt_builder_arguments(config);
+    REQUIRE(arguments.front() == "build-tensorrt-cache");
+    std::vector<std::string> text;
+    for (const auto& argument : arguments) text.push_back(argument.string());
+    const std::vector<std::string_view> views(text.begin() + 1, text.end());
+    const auto parsed = mouse::nn::parse_backend_command(BackendCommandKind::BuildCache, views);
+    REQUIRE(parsed.has_value());
+    const auto& child = parsed->backend;
+    CHECK(child.kind == config.kind);
+    CHECK(child.precision == config.precision);
+    CHECK(child.model_path == config.model_path);
+    CHECK(child.cache_directory == config.cache_directory);
+    CHECK(child.gpu_dll_directories == config.gpu_dll_directories);
+    CHECK(child.batch_buckets == config.batch_buckets);
+    CHECK(child.device_id == config.device_id);
+    CHECK(child.cpu_threads == config.cpu_threads);
+    CHECK(child.workspace_bytes == config.workspace_bytes);
+    CHECK(child.deterministic_compute == config.deterministic_compute);
+    config.workspace_bytes += 1;
+    CHECK_THROWS_AS(mouse::nn::detail::tensorrt_builder_arguments(config), std::logic_error);
+    config.workspace_bytes -= 1;
+    config.kind = mouse::nn::BackendKind::Cuda;
+    CHECK_THROWS_AS(mouse::nn::detail::tensorrt_builder_arguments(config), std::logic_error);
+}
+#endif

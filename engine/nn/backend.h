@@ -14,8 +14,16 @@
 #include "engine/nn/output.h"
 
 namespace mouse::nn {
-enum class BackendKind : std::uint8_t { Cpu, Cuda, TensorRt };
+enum class BackendKind : std::uint8_t { Cpu, Cuda, TensorRt, DirectMl };
+// The GPU backend a build runs by default: DirectML builds carry ORT's DirectML package,
+// which has no CUDA or TensorRT provider.
+inline constexpr BackendKind kDefaultGpuBackend =
+    MOUSE_DIRECTML ? BackendKind::DirectMl : BackendKind::TensorRt;
 enum class ComputePrecision : std::uint8_t { Float32, Float16 };
+// DirectML runs a graph in its own precision, so DirectML builds default to float32 graphs;
+// TensorRT builds an FP16 engine from either.
+inline constexpr ComputePrecision kDefaultPrecision =
+    MOUSE_DIRECTML ? ComputePrecision::Float32 : ComputePrecision::Float16;
 // Absolute per-user location; missing/relative environment values are errors.
 [[nodiscard]] Result<std::filesystem::path> default_cache_directory();
 struct BackendConfig {
@@ -23,8 +31,8 @@ struct BackendConfig {
     std::filesystem::path runtime_path;
     std::filesystem::path cache_directory;
     std::vector<std::filesystem::path> gpu_dll_directories;
-    BackendKind kind = BackendKind::TensorRt;
-    ComputePrecision precision = ComputePrecision::Float16;
+    BackendKind kind = kDefaultGpuBackend;
+    ComputePrecision precision = kDefaultPrecision;
     // ORT requests deterministic GPU kernels where supported; callers also
     // fix search scheduling and CPU worker counts for reproducible analysis.
     bool deterministic_compute = false;
@@ -32,6 +40,10 @@ struct BackendConfig {
     int device_id = 0;
     int cpu_threads = 1;
     std::uint64_t workspace_bytes = 1ULL << 30U;
+    // Executable that builds missing TensorRT engines in a child process
+    // (`<builder> build-tensorrt-cache <backend options>`), so this process only loads
+    // committed caches; empty builds them here. See ResidentTensorRt in backend.cpp.
+    std::filesystem::path tensorrt_builder;
     // Startup-only progress; invoked on the constructing owner, never from an
     // ORT callback or inference. An empty callback suppresses progress reporting.
     std::function<void(std::string_view)> initialization_progress;
@@ -78,4 +90,8 @@ class Backend {
 // multiprocessor count ("simple heuristic that seems to work for a wide range
 // of GPUs"), capped at the 1024 maximum. CPU: Mouse's fixed 64.
 [[nodiscard]] Result<std::size_t> recommended_minibatch(const BackendConfig& config);
+// DirectML reports no multiprocessor count, so its automatic minibatch is fixed. M1 on an
+// RTX 5070 through DirectML (2026-10-27, five-position UCI search, GPU shared with
+// training): FP32 5,242 / 5,789 / 5,182 nps at 64 / 128 / 256, FP16 6,915 / 8,238 / 8,064.
+inline constexpr std::size_t kDirectMlMinibatch = 128;
 }  // namespace mouse::nn

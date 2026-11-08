@@ -3,10 +3,14 @@
 
 #include <algorithm>
 #include <atomic>
+#include <array>
 #include <chrono>
+#include <cmath>
 #include <condition_variable>
 #include <cstdio>
 #include <exception>
+#include <filesystem>
+#include <fstream>
 #include <functional>
 #include <limits>
 #include <mutex>
@@ -20,7 +24,9 @@
 #include "engine/chess/attacks.h"
 #include "engine/chess/movegen.h"
 #include "engine/nn/command_runner.h"
+#include "engine/nn/encoder.h"
 #include "engine/nn/legal_cache.h"
+#include "engine/nn/policy_map.h"
 #include "engine/uci/emergency.h"
 #include "engine/uci/report.h"
 #include "engine/uci/score.h"
@@ -48,6 +54,17 @@ constexpr auto kProgressViewInterval = std::chrono::milliseconds{5};
 class MillisecondWaitResolution {
    public:
     MillisecondWaitResolution() {
+        // Windows 11 ignores timer requests from processes without a visible
+        // window (how GUIs and match runners start engines) unless the process
+        // opts out of timer-resolution power throttling. Windows 10 has no such
+        // throttling and rejects the flag, so a failure here changes nothing.
+        // https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-setprocessinformation
+        PROCESS_POWER_THROTTLING_STATE state{};
+        state.Version = PROCESS_POWER_THROTTLING_CURRENT_VERSION;
+        state.ControlMask = PROCESS_POWER_THROTTLING_IGNORE_TIMER_RESOLUTION;
+        state.StateMask = 0;
+        static_cast<void>(SetProcessInformation(GetCurrentProcess(), ProcessPowerThrottling, &state,
+                                                sizeof(state)));
         if (timeBeginPeriod(1) != TIMERR_NOERROR)
             throw std::runtime_error("Windows cannot provide the required 1ms UCI wait resolution");
     }
@@ -66,16 +83,24 @@ class MillisecondWaitResolution {
 class ObservedBackend final : public nn::Backend {
    public:
     ObservedBackend(std::unique_ptr<nn::Backend> backend, std::atomic<std::uint64_t>& calls,
+                    BucketLatencies& latencies,
                     std::function<void(std::string_view, std::size_t, std::size_t)> trace)
-        : backend_(std::move(backend)), calls_(calls), trace_(std::move(trace)) {}
+        : backend_(std::move(backend)),
+          calls_(calls),
+          latencies_(latencies),
+          trace_(std::move(trace)) {}
     Result<void> evaluate(std::span<const nn::InputPlanes> inputs,
                           std::span<nn::NNOutput> outputs) override {
         const auto physical = backend_->physical_batch_size(inputs.size());
         trace_("batch_begin", inputs.size(), physical);
+        const auto began = std::chrono::steady_clock::now();
         try {
             auto evaluated = backend_->evaluate(inputs, outputs);
             trace_(evaluated ? "batch_end" : "batch_error", inputs.size(), physical);
-            if (evaluated) calls_.fetch_add(1, std::memory_order_relaxed);
+            if (evaluated) {
+                latencies_.observe(physical, std::chrono::steady_clock::now() - began);
+                calls_.fetch_add(1, std::memory_order_relaxed);
+            }
             return evaluated;
         } catch (...) {
             trace_("batch_error", inputs.size(), physical);
@@ -93,6 +118,7 @@ class ObservedBackend final : public nn::Backend {
    private:
     std::unique_ptr<nn::Backend> backend_;
     std::atomic<std::uint64_t>& calls_;
+    BucketLatencies& latencies_;
     std::function<void(std::string_view, std::size_t, std::size_t)> trace_;
 };
 std::string diagnostic(std::string_view value) {
@@ -120,8 +146,12 @@ struct Session::Impl {
         search::SearchResult result;
         search::RootStatistics roots;
         std::vector<search::PrincipalVariation> variations;
+        // Lc0 EnsureBestMoveKnown: the move drawn by temperature, when one is in force.
+        std::optional<chess::Move> temperature_move;
         std::uint64_t inherited = 0;
         search::SnapshotCost snapshot_cost;
+        // A policy-head or value-head move: its info line has already gone out.
+        bool instant = false;
     };
     struct Turn {
         State state;
@@ -138,7 +168,7 @@ struct Session::Impl {
         // no publisher path acquires the live tree or a worker-owned mutex.
         search::SearchEngine* live = nullptr;
         std::atomic<std::shared_ptr<const View>> published{std::make_shared<const View>()};
-        std::uint64_t inherited = 0;
+        std::uint64_t inherited = 0, game_ply = 0;
         std::atomic<bool> done{false}, primed{false}, stop_requested{false};
         std::atomic<bool> hold_completed{false};
         Turn(State configured, GoCommand request, search::SearchLimits bounded,
@@ -200,6 +230,10 @@ struct Session::Impl {
     // Cache/reused/terminal roots cannot erase an observed inference stall;
     // retain the window across new games, clear only on backend reconfiguration.
     LatencyWindow root_latency;
+    BucketLatencies bucket_latency;
+    std::ofstream log_stream;  // output_mutex protects it.
+    // The current go's root moves came from the tables (one tbhit, as in lc0).
+    bool root_tablebase_hit = false;
     // Only the joined publisher reads/writes delivery timing, never inference.
     LatencyWindow publication_latency;
     std::mutex output_mutex, wait_mutex;
@@ -240,6 +274,27 @@ struct Session::Impl {
         if (pending) pending->cancel.request_stop();
         if (working) working->cancel.request_stop();
     }
+    // Lc0 LogFile: every UCI line in and out, stamped. A log that cannot be opened or written is
+    // reported once and then closed; it never disturbs the game. Callers hold output_mutex.
+    void log_line(std::string_view direction, std::string_view line) {
+        if (log_stream.is_open()) {
+            const auto now = std::chrono::system_clock::now();
+            const auto micros = std::chrono::duration_cast<std::chrono::microseconds>(
+                                    now.time_since_epoch())
+                                    .count();
+            log_stream << micros << ' ' << direction << ' ' << line << '\n' << std::flush;
+            if (!log_stream) log_stream.close();
+        }
+    }
+    void open_log(const std::string& path) {
+        const std::lock_guard lock(output_mutex);
+        if (log_stream.is_open()) log_stream.close();
+        log_stream.clear();
+        if (path.empty()) return;
+        log_stream.open(std::filesystem::path(std::u8string(path.begin(), path.end())),
+                        std::ios::app);
+        if (!log_stream.is_open()) output("info string error Cannot open LogFile: " + path);
+    }
     bool emit(std::string_view line, bool require_healthy = false) noexcept {
         if (output_failed.load(std::memory_order_acquire)) return false;
         try {
@@ -248,6 +303,7 @@ struct Session::Impl {
                 (require_healthy && status.load(std::memory_order_acquire) != 0))
                 return false;
             output(line);
+            log_line("<<", line);
             return true;
         } catch (...) {
             output_failed.store(true, std::memory_order_release);
@@ -361,6 +417,7 @@ struct Session::Impl {
             resolved_buckets.clear();
             physical_calls.store(0, std::memory_order_relaxed);
             root_latency.clear();
+            bucket_latency.clear();
         } else if (prepared_search_revision != state.search_revision) {
             engine.reset();
         }
@@ -383,7 +440,7 @@ struct Session::Impl {
             if (!made) return tl::unexpected(made.error());
             if (!*made) return tl::unexpected(std::string{"Backend factory returned no backend"});
             auto observed = std::make_unique<ObservedBackend>(
-                std::move(*made), physical_calls,
+                std::move(*made), physical_calls, bucket_latency,
                 [this](std::string_view event, std::size_t batch, std::size_t physical) {
                     trace(event, batch, physical);
                 });
@@ -417,6 +474,11 @@ struct Session::Impl {
         if (!engine) {
             auto search_config = state.options.search;
             search_config.maximum_batch = minibatch(state.options);
+            search_config.dag = state.options.algorithm == SearchAlgorithm::DagPreview;
+            search_config.cache_history_length =
+                static_cast<std::uint32_t>(state.options.cache_history_length);
+            if (state.options.task_workers >= 0 && !search_config.deterministic)
+                search_config.threads = static_cast<std::size_t>(state.options.task_workers);
             auto made =
                 search::SearchEngine::create(search_config, attacks, *backend, neural_cache.get());
             if (!made) return tl::unexpected(made.error());
@@ -438,7 +500,7 @@ struct Session::Impl {
                 }
             }
         }
-        // set_position also invalidates contextual terminal roots. The equal-
+        // set_position also resets a terminal leaf that became the root. The equal-
         // root path retains completed visits; unrelated roots reset their arena.
         auto configured = engine->set_position(state.position, state.history,
                                                prepared_game_generation == state.game_generation);
@@ -532,15 +594,69 @@ struct Session::Impl {
         request_preparation();
         return {};
     }
+    // Lc0 SyzygyPath: an empty path closes the tables. Tables that cannot be opened are reported,
+    // and the engine plays on without them, as it would with none configured.
+    void load_tablebase() {
+        options.search.tablebase.reset();
+        if (options.syzygy_path.empty()) return;
+        auto opened = search::Tablebase::open(options.syzygy_path);
+        if (!opened) {
+            error(opened.error());
+            return;
+        }
+        options.search.tablebase = std::move(*opened);
+        static_cast<void>(emit("info string Syzygy tablebases loaded, up to " +
+                               std::to_string(options.search.tablebase->max_cardinality()) +
+                               " pieces"));
+    }
     Result<search::SearchLimits> limits(const GoCommand& command) {
         if (!position.has_value())
             return tl::unexpected(std::string{"UCI session has no position"});
+        root_tablebase_hit = false;
         search::SearchLimits result;
         result.nodes = command.nodes;
         result.depth = command.depth;
         result.smart_pruning_factor = options.smart_pruning_factor;
         result.minimum_smart_pruning_batches = options.minimum_smart_pruning_batches;
         result.log_search_stats = options.log_search_stats;
+        // lc0 MakeRootMoveFilter: searchmoves override the tables; otherwise the search only
+        // looks at the moves they call best.
+        if (options.search.tablebase && command.searchmoves.empty()) {
+            if (const auto filter = options.search.tablebase->root_filter(
+                    *position, attacks, position->repeated_since_zeroing(),
+                    options.syzygy_fast_play)) {
+                result.root_in_dtz = filter->used_dtz;
+                root_tablebase_hit = true;
+                for (const auto move : filter->moves)
+                    result.searchmoves.at(result.searchmoves_count++) = move;
+            }
+        }
+        // lc0 fd71a2d classic/search.cc Search::Search: "play" becomes the side to move (the
+        // other one when pondering), and no side at all for an infinite search.
+        switch (options.contempt_mode) {
+            case ContemptMode::Play:
+                if (command.infinite) {
+                    result.contempt_side = search::ContemptSide::None;
+                    if (search::wdl_rescale_parameters(options.search.draw_rate).diff != 0.0F)
+                        static_cast<void>(emit(
+                            "info string WARNING: Contempt mode set to 'disable' as 'play' not "
+                            "supported for infinite search."));
+                } else
+                    result.contempt_side =
+                        (position->side_to_move() == chess::Color::Black) != command.ponder
+                            ? search::ContemptSide::Black
+                            : search::ContemptSide::White;
+                break;
+            case ContemptMode::WhiteSideAnalysis:
+                result.contempt_side = search::ContemptSide::White;
+                break;
+            case ContemptMode::BlackSideAnalysis:
+                result.contempt_side = search::ContemptSide::Black;
+                break;
+            case ContemptMode::Disable:
+                result.contempt_side = search::ContemptSide::None;
+                break;
+        }
         if (command.mate) {
             const auto plies = *command.mate * 2 - 1;
             result.depth = std::min(result.depth.value_or(plies), plies);
@@ -556,11 +672,14 @@ struct Session::Impl {
     [[nodiscard]] View collect(const Turn& turn) const {
         View view;
         auto* cost = debug_enabled.load(std::memory_order_relaxed) ? &view.snapshot_cost : nullptr;
-        const auto& searcher = *turn.live;
+        auto& searcher = *turn.live;
         // result_snapshot captures its best move and completed PV under one
         // tree lock. Later root statistics must not replace that decision.
         view.result = searcher.result_snapshot(cost);
         view.roots = searcher.root_moves(cost);
+        if (turn.state.options.search.temperature.temperature != 0.0 ||
+            turn.state.options.search.temperature.endgame != 0.0)
+            view.temperature_move = searcher.final_move(turn.game_ply);
         // Preserve the immutable turn's root restriction in every delivered view.
         if (turn.limits.searchmoves_count != 0) {
             std::size_t kept = 0;
@@ -593,6 +712,7 @@ struct Session::Impl {
         return turn.published.load(std::memory_order_acquire);
     }
     void report(const Turn& turn, const View& view) {
+        if (view.instant) return;
         const auto& info = view.result.info;
         // An unevaluated root has no NN score, WDL, priors or PV to report.
         if (info.nodes == 0 && turn.emergency_move.has_value()) return;
@@ -604,11 +724,11 @@ struct Session::Impl {
                              : static_cast<double>(
                                    info.nodes >= view.inherited ? info.nodes - view.inherited : 0) *
                                    1000.0 / static_cast<double>(elapsed.count());
-        const auto hashfull = info.tree_capacity == 0
+        const auto hashfull = info.tree_arena_bytes == 0
                                   ? 0
                                   : static_cast<unsigned>(std::min(
-                                        1000.0, static_cast<double>(info.tree_nodes) * 1000.0 /
-                                                    static_cast<double>(info.tree_capacity)));
+                                        1000.0, static_cast<double>(info.tree_used_bytes) * 1000.0 /
+                                                    static_cast<double>(info.tree_arena_bytes)));
         const auto count = view.variations.size();
         const auto lines = std::max(std::size_t{1}, count);
         for (std::size_t i = 0; i < lines; ++i) {
@@ -616,23 +736,65 @@ struct Session::Impl {
             const auto pv = i < count ? view.variations.at(i) : search::PrincipalVariation{};
             const double q = root && root->visits != 0 ? root->q : info.q;
             const double draw = root && root->visits != 0 ? root->draw : info.draw;
-            const auto score =
-                format_score({.q = static_cast<float>(q), .draw = static_cast<float>(draw)});
+            const auto& chosen = turn.state.options;
+            const auto contempt_side = turn.limits.contempt_side;
+            const auto rescale = search::wdl_rescale_parameters(chosen.search.draw_rate);
+            const bool black_root = turn.state.position.side_to_move() == chess::Color::Black;
+            const auto draw_score = (black_root ? -1.0 : 1.0) * chosen.search.draw_score;
+            const auto score = format_score(
+                {.q = static_cast<float>(q),
+                 .draw = static_cast<float>(draw),
+                 .type = chosen.score_type,
+                 .draw_score_q = static_cast<float>(q + draw_score * draw),
+                 .rescale_ratio = rescale.ratio,
+                 .rescale_diff =
+                     contempt_side == search::ContemptSide::None
+                         ? 0.0F
+                         : rescale.diff * static_cast<float>(chosen.search.draw_rate.eval_objectivity),
+                 .rescale_sign =
+                     (contempt_side == search::ContemptSide::Black) == black_root ? 1.0F : -1.0F,
+                 .max_s = static_cast<float>(chosen.search.draw_rate.max_s)});
             std::ostringstream line;
             line << "info depth " << pv.size << " seldepth " << info.seldepth << " nodes "
-                 << info.nodes << " nps "
+                 << (chosen.per_pv_counters && root ? root->visits : info.nodes) << " nps "
                  << (nps >= static_cast<double>(std::numeric_limits<std::uint64_t>::max())
                          ? std::numeric_limits<std::uint64_t>::max()
                          : static_cast<std::uint64_t>(nps))
-                 << " time " << elapsed.count() << " hashfull " << hashfull << " tbhits 0 multipv "
-                 << i + 1;
+                 << " time " << elapsed.count() << " hashfull " << hashfull << " tbhits "
+                 << info.tb_hits + (root_tablebase_hit ? 1U : 0U) << " multipv " << i + 1;
             if (score) {
-                line << " score cp " << score->centipawns;
+                // lc0 fd71a2d classic/search.cc SendUciInfo: a proven move reports mate in moves,
+                // from round(M) / 2 + 1, plus 100 for a tablebase result (which has no real
+                // distance to mate, so its M is the estimate it was given).
+                std::optional<int> mate;
+                if (root && root->visits != 0 &&
+                    (root->child_proof.outcome == search::ProofOutcome::Win ||
+                     root->child_proof.outcome == search::ProofOutcome::Loss)) {
+                    const bool tablebase =
+                        root->child_proof.mate_upper_bound >= search::kTablebaseMateDistance;
+                    const double distance = tablebase ? root->moves_left.value_or(0.0)
+                                                      : root->child_proof.mate_upper_bound;
+                    const auto moves =
+                        static_cast<int>(std::round(distance) / 2.0 + (tablebase ? 101.0 : 1.0));
+                    mate = root->child_proof.outcome == search::ProofOutcome::Loss ? moves : -moves;
+                }
+                if (mate)
+                    line << " score mate " << *mate;
+                else
+                    line << " score cp " << score->centipawns;
                 if (turn.state.options.show_wdl)
                     line << " wdl " << score->wdl[0] << ' ' << score->wdl[1] << ' '
                          << score->wdl[2];
             } else
                 error("Cannot represent UCI score: " + score.error());
+            // lc0 SendUciInfo: (1 + edge M, or 1 + the root's M with no visits) / 2, in moves.
+            if (chosen.show_moves_left) {
+                const auto own = root ? root->moves_left : std::nullopt;
+                const auto fallback = info.moves_left ? std::optional{1.0 + *info.moves_left}
+                                                      : std::nullopt;
+                if (const auto moves = own ? own : fallback)
+                    line << " movesleft " << static_cast<int>((1.0 + *moves) / 2.0);
+            }
             if (pv.size != 0) {
                 line << " pv";
                 for (std::size_t j = 0; j < pv.size; ++j)
@@ -661,13 +823,127 @@ struct Session::Impl {
              << (batches ? static_cast<double>(positions) / static_cast<double>(batches) : 0.0)
              << " p50 " << p50 << " max " << maximum << " collisions " << stats.collisions
              << " ooo " << stats.out_of_order << " proof_scans " << stats.proof_scans
-             << " selection_hits " << stats.selection_hits << " gather_ms " << ms(stats.gather)
-             << " nn_wait_ms " << ms(stats.nn_wait) << " backup_ms " << ms(stats.backup)
-             << " provider_ms " << ms(stats.provider) << " wall_ms " << ms(stats.wall)
-             << " gpu_idle_ms "
+             << " selection_hits " << stats.selection_hits << " twofold_reverts "
+             << stats.twofold_reverts << " gather_ms " << ms(stats.gather) << " nn_wait_ms "
+             << ms(stats.nn_wait) << " backup_ms " << ms(stats.backup) << " provider_ms "
+             << ms(stats.provider) << " wall_ms " << ms(stats.wall) << " gpu_idle_ms "
              << ms(std::max(stats.wall - stats.provider, std::chrono::nanoseconds::zero()))
              << " idle_basis host_provider_gaps";
         static_cast<void>(emit(line.str()));
+    }
+    // Evaluates in batches the backend's largest bucket can hold.
+    [[nodiscard]] Result<void> evaluate_rows(std::span<const nn::InputPlanes> inputs,
+                                             std::span<nn::NNOutput> outputs,
+                                             std::size_t bucket) {
+        for (std::size_t at = 0; at < inputs.size(); at += bucket) {
+            const auto rows = std::min(bucket, inputs.size() - at);
+            auto done = backend->evaluate(inputs.subspan(at, rows), outputs.subspan(at, rows));
+            if (!done) return done;
+        }
+        return {};
+    }
+    // lc0 fd71a2d search/instamove/instamove.cc: a move from the network alone, with no search.
+    [[nodiscard]] Result<void> instamove_turn(Turn& turn) {
+        auto root = turn.state.position;
+        auto frames = turn.state.history;
+        const auto legal = chess::legal_moves(root, attacks);
+        View view;
+        view.instant = true;
+        if (legal.empty()) {
+            turn.published.store(std::make_shared<const View>(std::move(view)),
+                                 std::memory_order_release);
+            return {};
+        }
+        const auto fill = turn.state.options.search.history_fill;
+        const auto input_format = backend->metadata().input_format;
+        const auto bucket = minibatch(turn.state.options);
+        const auto line = [](std::uint64_t nodes, std::optional<int> mate, double q, double draw) {
+            std::ostringstream text;
+            text << "info depth 1 seldepth 1 nodes " << nodes;
+            if (mate)
+                text << " score mate " << *mate;
+            else
+                text << " score cp " << static_cast<int>(90.0 * std::tan(1.5637541897 * q))
+                     << " wdl " << static_cast<int>(std::round(500.0 * (1.0 + q - draw))) << ' '
+                     << static_cast<int>(std::round(1000.0 * draw)) << ' '
+                     << static_cast<int>(std::round(500.0 * (1.0 - q - draw)));
+            return text.str();
+        };
+        const auto wdl_value = [](const nn::NNOutput& row) {
+            const double sum = static_cast<double>(row.wdl[0]) + row.wdl[1] + row.wdl[2];
+            return std::pair{(static_cast<double>(row.wdl[0]) - row.wdl[2]) / sum,
+                             row.wdl[1] / sum};
+        };
+        if (turn.state.options.algorithm == SearchAlgorithm::PolicyHead) {
+            auto encoded = nn::encode_classical(frames.frames(), input_format, fill);
+            if (!encoded) return tl::unexpected(encoded.error());
+            std::array<nn::InputPlanes, 1> input{*encoded};
+            std::array<nn::NNOutput, 1> evaluated{};
+            auto done = backend->evaluate(input, evaluated);
+            if (!done) return done;
+            std::optional<chess::Move> best;
+            float best_logit = -std::numeric_limits<float>::infinity();
+            for (const auto move : legal) {
+                const auto index = nn::PolicyMap::index(move, root.side_to_move());
+                if (!index) return tl::unexpected(index.error());
+                if (evaluated[0].policy_logits.at(*index) > best_logit) {
+                    best_logit = evaluated[0].policy_logits.at(*index);
+                    best = move;
+                }
+            }
+            const auto [q, draw] = wdl_value(evaluated[0]);
+            static_cast<void>(emit(line(1, std::nullopt, q, draw)));
+            view.result.best_move = best;
+        } else {
+            struct Score {
+                double negative_q = 0, draw = 0;
+                std::optional<int> mate;
+            };
+            std::vector<Score> scores(legal.size());
+            std::vector<nn::InputPlanes> inputs;
+            std::vector<std::size_t> rows;
+            for (std::size_t i = 0; i < legal.size(); ++i) {
+                auto child = root;
+                static_cast<void>(child.make_move(legal[i], attacks));
+                const auto replies = chess::legal_moves(child, attacks);
+                if (replies.empty() && child.in_check(attacks)) {
+                    scores[i] = {.negative_q = -1, .draw = 0, .mate = 1};
+                } else if (replies.empty() || child.is_rule50_draw() ||
+                           child.insufficient_material() || child.is_repetition(3)) {
+                    scores[i] = {.negative_q = 0, .draw = 1};
+                } else {
+                    auto next = frames;
+                    auto appended = next.append(child);
+                    if (!appended) return appended;
+                    auto encoded = nn::encode_classical(next.frames(), input_format, fill);
+                    if (!encoded) return tl::unexpected(encoded.error());
+                    inputs.push_back(*encoded);
+                    rows.push_back(i);
+                }
+            }
+            std::vector<nn::NNOutput> outputs(inputs.size());
+            auto done = evaluate_rows(inputs, outputs, bucket);
+            if (!done) return done;
+            for (std::size_t row = 0; row < rows.size(); ++row) {
+                const auto [q, draw] = wdl_value(outputs[row]);
+                scores[rows[row]] = {.negative_q = q, .draw = draw};
+            }
+            std::size_t best = 0;
+            const auto better = [](const Score& a, const Score& b) {
+                if (a.mate && !b.mate) return true;
+                if (!a.mate && b.mate) return false;
+                if (a.mate && b.mate) return *a.mate < *b.mate;
+                return a.negative_q < b.negative_q;
+            };
+            for (std::size_t i = 1; i < scores.size(); ++i)
+                if (better(scores[i], scores[best])) best = i;
+            static_cast<void>(emit(line(legal.size(), scores[best].mate, -scores[best].negative_q,
+                                        scores[best].draw)));
+            view.result.best_move = legal[best];
+        }
+        turn.published.store(std::make_shared<const View>(std::move(view)),
+                             std::memory_order_release);
+        return {};
     }
     void search_turn(Turn& turn) {
         if (turn.cancel.stop_requested()) return;
@@ -682,10 +958,26 @@ struct Session::Impl {
             return;
         }
         if (turn.cancel.stop_requested()) return;
+        if (turn.state.options.algorithm != SearchAlgorithm::Classic &&
+            turn.state.options.algorithm != SearchAlgorithm::DagPreview) {
+            auto played = instamove_turn(turn);
+            if (!played) fatal(played.error());
+            turn.primed.store(true, std::memory_order_release);
+            changed.notify_all();
+            return;
+        }
         turn.inherited = engine->snapshot().nodes;
         turn.live = engine.get();
         auto bounded = turn.limits;
         bounded.stop_token = turn.cancel.get_token();
+        if (turn.time.smooth) {
+            turn.time.smooth->begin(turn.inherited);
+            bounded.time_stopper = [plan = turn.time.smooth,
+                                    started = turn.started](const search::TimeSample& sample) {
+                return plan->decide(sample, std::chrono::duration_cast<std::chrono::milliseconds>(
+                                                Clock::now() - started));
+            };
+        }
         // Rebuilding the delivery view walks the root, PVs and snapshot under the
         // tree lock on the search thread, so after every batch it costs ~5% nps.
         // A deadline delivery may use a view up to this old; a search that ends
@@ -715,9 +1007,11 @@ struct Session::Impl {
         turn.primed.store(true, std::memory_order_release);
         if (turn.stop_requested.load(std::memory_order_acquire)) turn.cancel.request_stop();
         changed.notify_all();
-        const auto schedule =
-            schedule_search(turn.time, turn.started, Clock::now(), root_latency.estimate(),
-                            buckets(turn.state.options), minibatch(turn.state.options));
+        std::array<BucketCost, BucketLatencies::kCapacity> bucket_storage{};
+        const auto measured = bucket_latency.snapshot(bucket_storage);
+        const auto schedule = schedule_search(
+            turn.time, turn.started, Clock::now(), root_latency.estimate(),
+            buckets(turn.state.options), minibatch(turn.state.options), measured);
         bounded.deadline = schedule.deadline;
         bounded.maximum_batch = schedule.maximum_batch;
         if (turn.command.ponder && !turn.command.infinite) {
@@ -726,7 +1020,8 @@ struct Session::Impl {
             const auto hit_schedule =
                 hit_time
                     ? schedule_search(*hit_time, now, now, root_latency.estimate(),
-                                      buckets(turn.state.options), minibatch(turn.state.options))
+                                      buckets(turn.state.options), minibatch(turn.state.options),
+                                      measured)
                     : SearchSchedule{
                           .deadline = std::nullopt, .maximum_batch = 1, .exhausted = true};
             bounded.maximum_batch = hit_schedule.exhausted ? 1 : hit_schedule.maximum_batch;
@@ -750,6 +1045,9 @@ struct Session::Impl {
             totals += result->stats;
         }
         if (turn.state.options.log_search_stats) report_stats(totals);
+        if (turn.state.options.verbose_move_stats)
+            for (const auto& line : engine->verbose_move_stats(turn.state.options.chess960))
+                static_cast<void>(emit("info string " + line));
     }
     void worker_loop(const std::stop_token& stop) noexcept {
         while (!stop.stop_requested()) {
@@ -892,8 +1190,9 @@ struct Session::Impl {
                 report(*turn, *view);
                 // Keep the publication value initialized independently of optional resets.
                 // GCC 13 loses optional engagement tracking across the ranking branches.
-                auto best = view->result.best_move.value_or(chess::Move{});
-                bool has_best = view->result.best_move.has_value();
+                auto best = view->temperature_move ? *view->temperature_move
+                                                   : view->result.best_move.value_or(chess::Move{});
+                bool has_best = view->temperature_move || view->result.best_move.has_value();
                 if (has_best && turn->limits.searchmoves_count != 0 &&
                     std::find(turn->limits.searchmoves.begin(),
                               turn->limits.searchmoves.begin() +
@@ -914,7 +1213,8 @@ struct Session::Impl {
                 }
                 time_manager.complete(turn->time,
                                       std::chrono::duration_cast<std::chrono::milliseconds>(
-                                          Clock::now() - turn->started));
+                                          Clock::now() - turn->started),
+                                      view->result.info.nodes);
                 publishing.store(true, std::memory_order_release);
                 trace("bestmove");
                 if (status.load(std::memory_order_acquire) == 0)
@@ -959,6 +1259,7 @@ struct Session::Impl {
             return tl::unexpected(*failed_load);
         }
         auto turn = std::make_shared<Turn>(capture(), command, *bounded, *time, started);
+        turn->game_ply = lc0_game_ply;
         if (command.ponder && !command.infinite) {
             auto hit = command;
             hit.ponder = false;
@@ -1097,7 +1398,14 @@ struct Session::Impl {
                 else {
                     if (changed_option->impact != Reconfigure::None) ++search_revision;
                     if (changed_option->impact == Reconfigure::Backend) ++backend_revision;
+                    const bool new_log = changed_option->options.log_file != options.log_file;
+                    const bool new_tables =
+                        changed_option->options.syzygy_path != options.syzygy_path;
+                    if (changed_option->options.time_manager != options.time_manager)
+                        time_manager = LegacyTimeManager{changed_option->options.time_manager};
                     options = changed_option->options;
+                    if (new_log) open_log(options.log_file);
+                    if (new_tables) load_tablebase();
                     if (changed_option->impact != Reconfigure::None) request_preparation();
                 }
             }
@@ -1117,11 +1425,19 @@ struct Session::Impl {
     }
 };
 Session::Session(Options options, Output output, BackendFactory factory)
-    : impl_(std::make_unique<Impl>(std::move(options), std::move(output), std::move(factory))) {}
+    : impl_(std::make_unique<Impl>(std::move(options), std::move(output), std::move(factory))) {
+    impl_->time_manager = LegacyTimeManager{impl_->options.time_manager};
+    impl_->open_log(impl_->options.log_file);
+    impl_->load_tablebase();
+}
 Session::~Session() { shutdown(); }
 bool Session::handle(std::string_view line) {
     if (impl_->closed || impl_->status.load(std::memory_order_acquire) != 0) return false;
     try {
+        {
+            const std::lock_guard lock(impl_->output_mutex);
+            impl_->log_line(">>", line);
+        }
         const auto command = parse_command(line);
         if (!command) {
             impl_->error(command.error());

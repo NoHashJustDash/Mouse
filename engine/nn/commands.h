@@ -12,7 +12,7 @@
 #include "engine/nn/backend.h"
 
 namespace mouse::nn {
-enum class BackendCommandKind : std::uint8_t { Evaluate, Benchmark, Configuration };
+enum class BackendCommandKind : std::uint8_t { Evaluate, Benchmark, Configuration, BuildCache };
 struct BackendCommand {
     BackendConfig backend;
     std::filesystem::path inputs_path;

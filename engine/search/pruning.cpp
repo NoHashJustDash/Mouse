@@ -29,9 +29,11 @@ bool SmartPruning::should_stop(const PruningSample& sample) noexcept {
     // Source constants:200ms startup tolerance,300-node conservative NPS bias.
     // Widen before addition/multiplication for Mouse's uint64 visit extension.
     const auto measured = sample.elapsed - *first_eval_;
-    const auto nps = std::floor(1000.0L * (static_cast<long double>(sample.new_nodes) + 300.0L) /
+    const auto nps =
+        sample.nps ? static_cast<long double>(*sample.nps)
+                   : std::floor(1000.0L * (static_cast<long double>(sample.new_nodes) + 300.0L) /
                                 static_cast<long double>(measured.count())) +
-                     1.0L;
+                         1.0L;
     const auto time_remaining = static_cast<long double>(sample.remaining_time.count()) / 1000.0L;
     const auto possible = std::min(time_remaining * nps / factor_,
                                    static_cast<long double>(sample.remaining_nodes) / factor_);

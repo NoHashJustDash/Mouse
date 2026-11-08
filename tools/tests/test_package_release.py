@@ -74,11 +74,74 @@ def test_release_packages_corresponding_source_and_checked_install(
         assert "tools/setup_net.py" in archive.namelist()
         assert "tools/src/mouse_tools/setup_net.py" in archive.namelist()
         assert "nvcuda.dll" not in archive.namelist()
+        # The binary download carries its own licence terms and the network's data notice.
+        for notice in ("LICENSE", "docs/NETWORK.md", "docs/NVIDIA_PERMISSION.md"):
+            assert notice in archive.namelist()
     with zipfile.ZipFile(output / "mouse-1.0.0-rc.1-source.zip") as archive:
         assert archive.comment == b"unknown"
         assert "Mouse-source/engine/main.cpp" in archive.namelist()
     manifest = json.loads((output / "manifest.json").read_text())
     assert str(source) not in json.dumps(manifest)
+
+
+def test_release_source_includes_vendored_third_party_code(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source, build = release_fixture(tmp_path, monkeypatch)
+    vendored = source / "third_party/lc0_syzygy/syzygy.cc"
+    vendored.parent.mkdir(parents=True)
+    vendored.write_text("// vendored under its own licence\n", encoding="utf-8")
+    output = tmp_path / "release"
+    result = package.produce_release(source, build, "1.0.0-rc.1", output)
+    assert result["status"] == "candidate_passed", result["errors"]
+    with zipfile.ZipFile(output / "mouse-1.0.0-rc.1-source.zip") as archive:
+        assert "Mouse-source/third_party/lc0_syzygy/syzygy.cc" in archive.namelist()
+
+
+def test_release_size_limit_exempts_only_the_named_test_network(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source, build = release_fixture(tmp_path, monkeypatch)
+    named = source / "tests/data/backend/moe-tiny.onnx"
+    named.parent.mkdir(parents=True, exist_ok=True)
+    named.write_bytes(b"\0" * (package.MAX_SMALL_TEST_FIXTURE + 1))
+    output = tmp_path / "release"
+    result = package.produce_release(source, build, "1.0.0-rc.1", output)
+    assert result["status"] == "candidate_passed", result["errors"]
+
+    other = source / "tests/data/backend/other.onnx"
+    other.write_bytes(b"\0" * (package.MAX_SMALL_TEST_FIXTURE + 1))
+    with pytest.raises(package.PackageError, match="Production net"):
+        package.produce_release(source, build, "1.0.0-rc.1", tmp_path / "second")
+
+
+def test_release_bundles_a_network_under_its_public_name(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source, build = release_fixture(tmp_path, monkeypatch)
+    net = tmp_path / "private-name.onnx"
+    net.write_bytes(b"a plain onnx network")
+    output = tmp_path / "release"
+    result = package.produce_release(source, build, "1.0.0-rc.1", output, net=net)
+    assert result["status"] == "candidate_passed", result["errors"]
+    assert result["net_sha256"] == sha(net.read_bytes())
+    with zipfile.ZipFile(output / "mouse-1.0.0-rc.1-windows-x64.zip") as archive:
+        assert archive.read(package.NET_NAME) == net.read_bytes()
+        assert "private-name.onnx" not in archive.namelist()
+    with zipfile.ZipFile(output / "mouse-1.0.0-rc.1-source.zip") as archive:
+        assert not any(name.endswith(package.NET_NAME) for name in archive.namelist())
+    assert str(net) not in (output / "manifest.json").read_text()
+
+
+def test_release_refuses_a_plugin_network_without_the_plugin(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source, build = release_fixture(tmp_path, monkeypatch)
+    net = tmp_path / "net.onnx"
+    net.write_bytes(b"graph with " + package.PLUGIN_OP + b" nodes")
+    with pytest.raises(package.PackageError, match="plugin"):
+        package.produce_release(source, build, "1.0.0-rc.1", tmp_path / "release", net=net)
+    assert not (tmp_path / "release").exists()
 
 
 @pytest.mark.parametrize(

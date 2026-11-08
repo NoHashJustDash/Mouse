@@ -91,7 +91,7 @@ TEST_CASE("Leaf classification distinguishes exact terminal reasons and both per
         CHECK(status->reason == row.reason);
         CHECK(status->q == row.q);
         CHECK(status->draw == row.draw);
-        CHECK_FALSE(status->contextual);
+        CHECK(status->repetition_cycle == 0);
         CHECK(position == before);
     }
 }
@@ -112,12 +112,19 @@ TEST_CASE("Game threefold and current-tree twofold have separate contexts", "[se
     CHECK(repeated->reason == TerminalReason::TreeRepetition);
     CHECK(repeated->q == 0);
     CHECK(repeated->draw == 1);
-    CHECK(repeated->contextual);
+    CHECK(repeated->repetition_cycle == 1);
+    // The cycle is measured to the most recent earlier occurrence (lc0
+    // GetPliesSincePrevRepetition), which becomes the terminal's moves-left.
+    const std::array<std::uint64_t, 4> twice{position.key(), 11, position.key(), 13};
+    const auto latest = mouse::search::classify_leaf(position, attacks, twice);
+    REQUIRE(latest);
+    CHECK(latest->reason == TerminalReason::TreeRepetition);
+    CHECK(latest->repetition_cycle == 2);
     cycle(position, attacks);
     const auto game = mouse::search::classify_leaf(position, attacks, ancestors);
     REQUIRE(game);
     CHECK(game->reason == TerminalReason::Threefold);
-    CHECK_FALSE(game->contextual);
+    CHECK(game->repetition_cycle == 0);
 }
 
 TEST_CASE("Exact encoding history equality includes clocks repetitions EP and earlier frames",
@@ -245,7 +252,7 @@ TEST_CASE("Explicit root context skips only rule draws and retains complete lega
     REQUIRE(root);
     REQUIRE(child);
     CHECK(root->reason == TerminalReason::None);
-    CHECK_FALSE(root->contextual);
+    CHECK(root->repetition_cycle == 0);
     CHECK(child->reason == TerminalReason::Threefold);
     for (const auto fen :
          {"7k/6Q1/5K2/8/8/8/8/8 b - - 100 50", "7k/5K2/6Q1/8/8/8/8/8 b - - 100 50"}) {

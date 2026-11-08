@@ -33,11 +33,10 @@ EdgeSeed seed(unsigned int tag, std::uint16_t bits = 0x3800) {
 }
 bool same_node(const Node& left, const Node& right) {
     return std::tie(left.value_sum, left.draw_sum, left.visits, left.in_flight, left.first_edge,
-                    left.edge_count, left.state, left.contextual_draw, left.leaf_q,
-                    left.leaf_draw) == std::tie(right.value_sum, right.draw_sum, right.visits,
-                                                right.in_flight, right.first_edge, right.edge_count,
-                                                right.state, right.contextual_draw, right.leaf_q,
-                                                right.leaf_draw);
+                    left.edge_count, left.state, left.twofold, left.leaf_q, left.leaf_draw) ==
+           std::tie(right.value_sum, right.draw_sum, right.visits, right.in_flight,
+                    right.first_edge, right.edge_count, right.state, right.twofold, right.leaf_q,
+                    right.leaf_draw);
 }
 struct Snapshot {
     TreeStats stats;
@@ -97,8 +96,14 @@ TEST_CASE("Tree rejects impossible budgets and charges all fixed storage", "[sea
     CHECK(stats.edge_count == 0);
     CHECK(stats.node_capacity > 1);
     CHECK(stats.edge_capacity > 1);
+    // One arena holds nodes and edges, so each capacity alone fits in it; the
+    // charge also covers the reuse workspaces sized for the most nodes.
+    CHECK(stats.node_capacity <= stats.node_limit);
+    CHECK(stats.node_capacity * sizeof(Node) <= stats.arena_bytes);
+    CHECK(sizeof(Node) + stats.edge_capacity * sizeof(Edge) <= stats.arena_bytes);
+    CHECK(stats.used_bytes == sizeof(Node));
     CHECK(stats.charged_bytes >=
-          sizeof(Tree) + stats.node_capacity * sizeof(Node) + stats.edge_capacity * sizeof(Edge));
+          sizeof(Tree) + stats.arena_bytes + 2 * stats.node_limit * sizeof(NodeId));
     CHECK(tree->root() == 0);
     CHECK(same_node(tree->node(0), Node{}));
 }
@@ -170,6 +175,39 @@ TEST_CASE("Tree edge exhaustion does not partially expand a node", "[search][tre
     check_snapshot(*tree, exhausted);
 }
 
+TEST_CASE("Tree nodes and edges share one budget whatever the branching factor",
+          "[search][tree][shared-arena]") {
+    // Regression: a fixed eight edges per node slot ran out of edges at about a
+    // quarter of the node slots in middlegames (~35 legal moves), so infinite
+    // analysis stopped near 570k nodes at the default 512 MiB.
+    constexpr std::size_t budget = 1U << 20U;
+    constexpr std::size_t slack = sizeof(Tree) + 1024;
+    for (const std::size_t branching : {std::size_t{5}, std::size_t{35}}) {
+        auto tree = make_tree(budget);
+        std::vector<EdgeSeed> seeds;
+        for (unsigned int index = 0; index < branching; ++index) seeds.push_back(seed(index));
+        NodeId current = 0;
+        std::size_t expanded = 0;
+        for (;;) {
+            if (expanded != 0) {
+                const auto next = tree->allocate_node();
+                if (!next) break;
+                current = *next;
+            }
+            if (!tree->expand(current, seeds)) break;
+            ++expanded;
+        }
+        // Nodes and their edges fill the arena, and the arena takes at least 90%
+        // of the budget (the rest: reuse workspaces sized for the most nodes).
+        const auto per_node = sizeof(Node) + branching * sizeof(Edge);
+        const auto stats = tree->stats();
+        INFO("branching " << branching << ", expanded " << expanded);
+        CHECK(expanded + 1 >= (budget - slack) * 9 / 10 / per_node);
+        CHECK(stats.used_bytes + per_node > stats.arena_bytes);
+        CHECK(stats.charged_bytes <= budget);
+    }
+}
+
 TEST_CASE("Tree accessor and nonexpandable state failures are explicit", "[search][tree]") {
     auto tree = make_tree();
     const auto& immutable = *tree;
@@ -229,7 +267,7 @@ TEST_CASE("Tree reroot compacts edges in allocation order rather than node order
     REQUIRE(result);
     CHECK(result->kept_nodes == 4);
     CHECK(result->kept_edges == 5);
-    CHECK_FALSE(result->discarded_context);
+    CHECK_FALSE(result->reset_terminal_root);
     CHECK(tree->generation() == generation + 1);
     CHECK(tree->root() == 0);
     CHECK(tree->stats().node_count == 4);
@@ -239,9 +277,12 @@ TEST_CASE("Tree reroot compacts edges in allocation order rather than node order
         expected.first_edge = tree->node(id).first_edge;
         CHECK(same_node(tree->node(id), expected));
     }
-    CHECK(tree->node(2).first_edge == 0);
-    CHECK(tree->node(1).first_edge == 2);
-    CHECK(tree->node(0).first_edge == 3);
+    // Kept blocks are packed against the arena's end in their allocation order:
+    // right (allocated first among them), then left, then keep.
+    const auto end = static_cast<EdgeId>(tree->stats().arena_bytes / sizeof(Edge));
+    CHECK(tree->node(2).first_edge == end - 2);
+    CHECK(tree->node(1).first_edge == end - 3);
+    CHECK(tree->node(0).first_edge == end - 5);
     CHECK(tree->edges(0)[0].move == seed(12).move);
     CHECK(tree->edges(0)[0].child == 1);
     CHECK(tree->edges(0)[1].child == 2);
@@ -253,7 +294,7 @@ TEST_CASE("Tree reroot compacts edges in allocation order rather than node order
     CHECK(allocate(*tree) == 4);
 }
 
-TEST_CASE("Tree contextual descendants discard every retained statistic", "[search][tree]") {
+TEST_CASE("Tree keeps twofold descendants and their statistics on reuse", "[search][tree]") {
     auto tree = make_tree();
     const auto keep = allocate(*tree);
     const auto leaf = allocate(*tree);
@@ -261,22 +302,26 @@ TEST_CASE("Tree contextual descendants discard every retained statistic", "[sear
     tree->edges(keep)[0].child = leaf;
     tag_node(tree->node(keep), 4);
     tree->node(leaf).state = NodeState::Terminal;
-    tree->node(leaf).contextual_draw = true;
+    tree->node(leaf).twofold = true;
+    tree->node(leaf).leaf_moves_left = 6.0F;
+    const auto saved = tree->node(keep);
     const auto result = tree->re_root(keep);
     REQUIRE(result);
-    CHECK(result->discarded_context);
-    CHECK(result->kept_nodes == 1);
-    CHECK(result->kept_edges == 0);
-    CHECK(same_node(tree->node(0), Node{}));
-    CHECK(tree->stats().node_count == 1);
-    CHECK(tree->stats().edge_count == 0);
+    CHECK_FALSE(result->reset_terminal_root);
+    CHECK(result->kept_nodes == 2);
+    CHECK(result->kept_edges == 1);
+    auto expected = saved;
+    expected.first_edge = tree->node(0).first_edge;
+    CHECK(same_node(tree->node(0), expected));
+    CHECK(tree->node(1).twofold);
+    CHECK(tree->node(1).leaf_moves_left == 6.0F);
 }
 
-TEST_CASE("Tree ignores discarded contextual nodes and supports repeated compaction",
+TEST_CASE("Tree ignores unreachable twofold nodes and supports repeated compaction",
           "[search][tree]") {
     auto tree = make_tree();
     const auto discarded = allocate(*tree);
-    tree->node(discarded).contextual_draw = true;
+    tree->node(discarded).twofold = true;
     auto current = allocate(*tree);
     for (unsigned int depth = 0; depth < 30; ++depth) {
         const auto next = allocate(*tree);
@@ -286,7 +331,7 @@ TEST_CASE("Tree ignores discarded contextual nodes and supports repeated compact
     }
     auto result = tree->re_root(2);
     REQUIRE(result);
-    CHECK_FALSE(result->discarded_context);
+    CHECK_FALSE(result->reset_terminal_root);
     CHECK(result->kept_nodes == 31);
     for (unsigned int depth = 0; depth < 30; ++depth) {
         REQUIRE(tree->edges(0).size() == 1);
@@ -311,7 +356,7 @@ TEST_CASE("Tree malformed reroot graph is rejected before observable mutation", 
         if (fault == 2) tree->edges(0)[0].child = 9;      // invalid allocated ID
         if (fault == 3) tree->edges(0)[1].prior_bits = 0x8000;
         if (fault == 4) {  // overlapping edge blocks
-            tree->node(child).first_edge = 0;
+            tree->node(child).first_edge = tree->node(0).first_edge;
             tree->node(child).edge_count = 1;
         }
         const auto before = snapshot(*tree);
@@ -444,7 +489,7 @@ TEST_CASE("Tree deep reverse-allocated blocks compact without recursion", "[sear
     CHECK(tree->node(511).visits == 7);
 }
 
-TEST_CASE("Tree reroot distinguishes root context from context in discarded siblings",
+TEST_CASE("Tree reroot keeps a terminal root and drops twofolds in discarded siblings",
           "[search][tree]") {
     auto tree = make_tree();
     const auto keep = allocate(*tree);
@@ -452,19 +497,22 @@ TEST_CASE("Tree reroot distinguishes root context from context in discarded sibl
     REQUIRE(tree->expand(0, std::array{seed(1), seed(2)}));
     tree->edges(0)[0].child = keep;
     tree->edges(0)[1].child = discard;
-    tree->node(discard).contextual_draw = true;
+    tree->node(discard).twofold = true;
     tree->node(keep).state = NodeState::Terminal;
     tree->node(keep).leaf_q = -1;
     tree->node(keep).visits = 13;
     auto result = tree->re_root(keep);
     REQUIRE(result);
-    CHECK_FALSE(result->discarded_context);
+    CHECK_FALSE(result->reset_terminal_root);
+    CHECK(result->kept_nodes == 1);
     CHECK(tree->node(0).visits == 13);
     CHECK(tree->node(0).leaf_q == -1);
     CHECK(tree->node(0).state == NodeState::Terminal);
-    tree->node(0).contextual_draw = true;
+    // A terminal that becomes the root is the search's to reset (it reclassifies
+    // the root position); the tree keeps statistics as they are.
+    tree->node(0).twofold = true;
+    const auto saved = tree->node(0);
     result = tree->re_root(0);
     REQUIRE(result);
-    CHECK(result->discarded_context);
-    CHECK(same_node(tree->node(0), Node{}));
+    CHECK(same_node(tree->node(0), saved));
 }

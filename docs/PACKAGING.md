@@ -18,11 +18,15 @@ the Windows x64 ZIP, corresponding-source ZIP, SHA256SUMS, and manifest.json.
 Source snapshots, configuration, built and installed binaries remain hash-bound
 through publication. Existing output is immutable. This validates artifacts,
 not chess strength or tournament release gates; `release_gate` remains false.
-No network weights or NVIDIA runtime DLLs are included. Four Microsoft ONNX
-Runtime DLLs are bundled, including its CUDA and TensorRT provider adapters.
-Install the documented NVIDIA dependencies separately.
+Pass `--net <file>` to ship a network in the binary ZIP as `M1.5.onnx`; it stays out of
+the source ZIP. A network that uses the Mouse-MoE plugin needs a build configured with
+`MOUSE_TRT_MOE_PLUGIN=ON` (preset `windows-moe`), which adds the plugin and its licence to
+the install. No NVIDIA runtime DLLs are included. Four Microsoft ONNX Runtime DLLs are
+bundled, including its CUDA and TensorRT provider adapters. Install the documented NVIDIA
+dependencies separately.
 
-After extracting the binary package, install the tools dependencies and module:
+To play the T1 network, install the tools dependencies and module after extracting the
+binary package:
 
 ```powershell
 py -3.12 -m venv .venv

@@ -36,7 +36,7 @@ APPROVED_CORPUS = {
     "provenance.json": "583e78d16a0022dc2092180cdfa3fd05f05535888219230949a91d5c9927f66b",
     "uci-handshake.txt": "62171394a8c935c7c2a1efe26ef9a4dca6eb0ee81be0db3b31ab196c8f2d3123",
     "README.md": "6ead203bacf651a7d5347367ef17d555eb8925ff3f4204f57dccdb0bf5b199bf",
-    "live-verification.json": "f58891e5b30eca5ddbe00af37f742e12b5777c8c569a705aae92c70fcb39773f",
+    "live-verification.json": "3cdd47d36b4068fd034f3d3259f39b034cadb3906c967511c8e3f9a41e827c8e",
 }
 PROVIDERS = {
     "cpu": "CPUExecutionProvider",

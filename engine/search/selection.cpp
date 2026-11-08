@@ -54,7 +54,10 @@ Result<void> validate_selection_parameters(const SelectionParameters& parameters
                             parameters.root_fpu,     parameters.policy_temperature};
     for (const double value : values)
         if (!std::isfinite(value)) return tl::unexpected("Selection parameters must all be finite");
-    if (parameters.cpuct < 0 || parameters.cpuct_factor < 0 || parameters.fpu_reduction < 0 ||
+    if (parameters.fpu_absolute && (parameters.fpu_reduction < -100 || parameters.fpu_reduction > 100))
+        return tl::unexpected("An absolute FpuValue requires -100..100");
+    if (parameters.cpuct < 0 || parameters.cpuct_factor < 0 ||
+        (!parameters.fpu_absolute && parameters.fpu_reduction < 0) ||
         parameters.cpuct_base <= 0 || parameters.policy_temperature <= 0 ||
         parameters.root_fpu < -100 || parameters.root_fpu > 100)
         return tl::unexpected("Selection parameters are outside their mathematical ranges");
@@ -96,6 +99,8 @@ double first_play_urgency(const SelectionParameters& parameters, bool root, doub
     // explicit root override. Half-rounded visited prior mass is not clamped.
     if (root && parameters.root_fpu_strategy == RootFpuStrategy::Absolute)
         return parameters.root_fpu;
+    if (parameters.fpu_absolute && (!root || parameters.root_fpu_strategy == RootFpuStrategy::Same))
+        return parameters.fpu_reduction;
     const double reduction = root && parameters.root_fpu_strategy == RootFpuStrategy::Reduction
                                  ? parameters.root_fpu
                                  : parameters.fpu_reduction;

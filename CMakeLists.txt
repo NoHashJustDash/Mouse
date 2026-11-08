@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 cmake_minimum_required(VERSION 3.28)
-project(Mouse VERSION 1.0.0 LANGUAGES CXX)
+project(Mouse VERSION 1.1.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -14,6 +14,9 @@ include(cmake/OnnxRuntime.cmake)
 option(MOUSE_USE_PEXT "Use BMI2 PEXT sliding attacks (CPU support is checked explicitly)" OFF)
 option(MOUSE_ENABLE_GPU_TESTS "Register local GPU provider tests (requires explicit SDK directories)" OFF)
 option(MOUSE_CLANG_TIDY "Run clang-tidy while compiling project sources" OFF)
+option(MOUSE_TRT_MOE_PLUGIN "Build the TensorRT Mouse-MoE expert plugin (needs NVCC and TensorRT headers)" OFF)
+set(MOUSE_TENSORRT_ROOT "" CACHE PATH "TensorRT SDK root with include/NvInfer.h and lib/nvinfer_10.lib")
+set(MOUSE_CUTLASS_ROOT "" CACHE PATH "CUTLASS 3.9.2 source root (include/cutlass, LICENSE.txt)")
 set(MOUSE_SANITIZER "" CACHE STRING "Instrumentation: address or thread")
 set_property(CACHE MOUSE_SANITIZER PROPERTY STRINGS "" address thread)
 # Empty cache values select checkout metadata, or explicit unknown for an archive.
@@ -51,7 +54,8 @@ add_custom_target(mouse_build_identity ALL
 find_package(tl-expected CONFIG REQUIRED)
 find_package(Catch2 3 CONFIG REQUIRED)
 find_package(Threads REQUIRED)
-add_library(mouse_util STATIC engine/util/runtime_library.cpp engine/util/sha256.cpp engine/util/hash128.cpp)
+add_library(mouse_util STATIC engine/util/runtime_library.cpp engine/util/sha256.cpp engine/util/hash128.cpp
+  engine/util/fast_math.cpp)
 target_include_directories(mouse_util PUBLIC "${PROJECT_SOURCE_DIR}" "${PROJECT_BINARY_DIR}/generated")
 target_include_directories(mouse_util SYSTEM PUBLIC "${MOUSE_ORT_INCLUDE_DIR}")
 target_link_libraries(mouse_util PUBLIC tl::expected PRIVATE "${CMAKE_DL_LIBS}")
@@ -71,7 +75,7 @@ target_compile_definitions(mouse_chess PUBLIC MOUSE_USE_PEXT=$<BOOL:${MOUSE_USE_
 mouse_target_options(mouse_chess)
 add_library(mouse_nn STATIC engine/nn/encoder.cpp engine/nn/policy_map.cpp
   engine/nn/history.cpp engine/nn/model_metadata.cpp engine/nn/model_artifact.cpp engine/nn/commands.cpp engine/nn/output.cpp
-  engine/nn/backend.cpp engine/nn/backend_gpu.cpp engine/nn/cache.cpp
+  engine/nn/backend.cpp engine/nn/backend_gpu.cpp engine/nn/tensorrt_builder.cpp engine/nn/cache.cpp
   engine/nn/cached_backend.cpp engine/nn/legal_output.cpp engine/nn/legal_cache.cpp engine/nn/legal_evaluator.cpp engine/nn/command_runner.cpp)
 target_include_directories(mouse_nn PUBLIC "${PROJECT_SOURCE_DIR}")
 target_link_libraries(mouse_nn PUBLIC mouse_chess mouse_util PRIVATE Threads::Threads)
@@ -90,12 +94,44 @@ if(MOUSE_CUDA_INCLUDE_DIR)
 else()
   target_compile_definitions(mouse_nn PRIVATE MOUSE_HAS_CUDA_HEADERS=0)
 endif()
+# DirectML builds choose their GPU through DXGI; ORT's DirectML provider does the rest.
+if(MOUSE_ORT_DIRECTML)
+  target_compile_definitions(mouse_nn PUBLIC MOUSE_DIRECTML=1)
+  target_link_libraries(mouse_nn PRIVATE dxgi)
+else()
+  target_compile_definitions(mouse_nn PUBLIC MOUSE_DIRECTML=0)
+endif()
 mouse_target_options(mouse_nn)
+# Optional fused routed-expert kernel for Mouse-MoE nets on TensorRT. The engine itself
+# still compiles no CUDA; only this plugin library does, and only when requested.
+if(MOUSE_TRT_MOE_PLUGIN)
+  if(NOT EXISTS "${MOUSE_TENSORRT_ROOT}/include/NvInfer.h" OR NOT EXISTS "${MOUSE_TENSORRT_ROOT}/lib/nvinfer_10.lib")
+    message(FATAL_ERROR "MOUSE_TRT_MOE_PLUGIN needs MOUSE_TENSORRT_ROOT with include/NvInfer.h and lib/nvinfer_10.lib")
+  endif()
+  if(NOT EXISTS "${MOUSE_CUTLASS_ROOT}/include/cutlass/gemm/device/gemm_grouped.h" OR NOT EXISTS "${MOUSE_CUTLASS_ROOT}/LICENSE.txt")
+    message(FATAL_ERROR "MOUSE_TRT_MOE_PLUGIN needs MOUSE_CUTLASS_ROOT with include/cutlass and LICENSE.txt")
+  endif()
+  enable_language(CUDA)
+  add_library(mouse_moe_trt SHARED engine/nn/trt_moe/moe_plugin.cu)
+  # cp.async and half tensor cores: Ampere (sm_80) and newer; PTX for later GPUs.
+  set_target_properties(mouse_moe_trt PROPERTIES CUDA_STANDARD 17 CUDA_STANDARD_REQUIRED ON
+    CUDA_ARCHITECTURES "80-real;86-real;89-real;90-real;100-real;120" CUDA_RUNTIME_LIBRARY Static)
+  target_include_directories(mouse_moe_trt SYSTEM PRIVATE "${MOUSE_TENSORRT_ROOT}/include" "${MOUSE_CUTLASS_ROOT}/include")
+  # CUTLASS checks __cplusplus, which MSVC reports as C++98 without /Zc:__cplusplus.
+  target_compile_options(mouse_moe_trt PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:--expt-relaxed-constexpr>
+    $<$<AND:$<COMPILE_LANGUAGE:CUDA>,$<CXX_COMPILER_ID:MSVC>>:-Xcompiler=/Zc:__cplusplus,/permissive->)
+  target_link_libraries(mouse_moe_trt PRIVATE "${MOUSE_TENSORRT_ROOT}/lib/nvinfer_10.lib")
+  target_compile_definitions(mouse_nn PUBLIC MOUSE_TRT_MOE_PLUGIN=1)
+endif()
+# Lc0's Syzygy probing code, vendored under its own license (third_party/README.md).
+add_library(mouse_syzygy STATIC third_party/lc0_syzygy/syzygy.cc)
+target_include_directories(mouse_syzygy PUBLIC "${PROJECT_SOURCE_DIR}")
+target_link_libraries(mouse_syzygy PUBLIC mouse_chess)
 add_library(mouse_search STATIC
-  engine/search/tree.cpp engine/search/proof.cpp engine/search/moves_left.cpp engine/search/prior.cpp engine/search/selection.cpp engine/search/pruning.cpp engine/search/collisions.cpp
-  engine/search/rules.cpp engine/search/commands.cpp engine/search/search.cpp engine/search/command_runner.cpp)
+  engine/search/tree.cpp engine/search/proof.cpp engine/search/moves_left.cpp engine/search/draw_rate.cpp engine/search/prior.cpp engine/search/selection.cpp engine/search/pruning.cpp engine/search/collisions.cpp
+  engine/search/rules.cpp engine/search/commands.cpp engine/search/search.cpp engine/search/command_runner.cpp engine/search/tablebase.cpp)
 target_include_directories(mouse_search PUBLIC "${PROJECT_SOURCE_DIR}")
-target_link_libraries(mouse_search PUBLIC mouse_nn PRIVATE Threads::Threads)
+target_link_libraries(mouse_search PUBLIC mouse_nn PRIVATE Threads::Threads mouse_syzygy)
 mouse_target_options(mouse_search)
 add_library(mouse_uci STATIC engine/uci/commands.cpp engine/uci/emergency.cpp engine/uci/score.cpp engine/uci/options.cpp engine/uci/time.cpp engine/uci/session.cpp
     engine/uci/report.cpp engine/uci/input.cpp engine/uci/command_runner.cpp engine/uci/bench.cpp)
@@ -105,9 +141,16 @@ if(WIN32)
   target_link_libraries(mouse_uci PRIVATE winmm)
 endif()
 mouse_target_options(mouse_uci)
+add_library(mouse_selfplay STATIC engine/selfplay/selfplay.cpp engine/selfplay/training_data.cpp)
+target_include_directories(mouse_selfplay PUBLIC "${PROJECT_SOURCE_DIR}")
+target_link_libraries(mouse_selfplay PUBLIC mouse_uci PRIVATE Threads::Threads)
+mouse_target_options(mouse_selfplay)
 add_executable(mouse engine/main.cpp)
-target_link_libraries(mouse PRIVATE mouse_util mouse_chess mouse_nn mouse_search mouse_uci)
+target_link_libraries(mouse PRIVATE mouse_util mouse_chess mouse_nn mouse_search mouse_uci mouse_selfplay)
 add_dependencies(mouse mouse_build_identity)
+if(MOUSE_TRT_MOE_PLUGIN)
+  add_dependencies(mouse mouse_moe_trt)
+endif()
 mouse_target_options(mouse)
 mouse_copy_ort_runtime(mouse)
 
@@ -138,10 +181,10 @@ if(BUILD_TESTING)
 
   add_executable(mouse_tests tests/util/runtime_library_test.cpp tests/util/sha256_test.cpp tests/util/hash128_test.cpp tests/gpu/runtime_gpu_test.cpp
     tests/chess/attacks_test.cpp tests/chess/position_test.cpp tests/chess/perft_suite_test.cpp tests/nn/encoder_test.cpp tests/nn/policy_map_test.cpp tests/nn/history_test.cpp tests/nn/model_metadata_test.cpp tests/nn/model_artifact_test.cpp tests/nn/commands_test.cpp tests/nn/backend_test.cpp tests/nn/cache_test.cpp tests/nn/cached_backend_test.cpp tests/nn/legal_cache_test.cpp
-    tests/search/tree_test.cpp tests/search/proof_test.cpp tests/search/proof_search_test.cpp tests/search/moves_left_test.cpp tests/search/prior_test.cpp
-    tests/search/selection_test.cpp tests/search/pruning_test.cpp tests/search/collisions_test.cpp tests/search/rules_test.cpp tests/search/commands_test.cpp tests/search/search_test.cpp tests/search/pipeline_test.cpp tests/uci/commands_test.cpp tests/uci/score_test.cpp tests/uci/options_test.cpp tests/uci/session_test.cpp
+    tests/search/tree_test.cpp tests/search/proof_test.cpp tests/search/proof_search_test.cpp tests/search/moves_left_test.cpp tests/search/draw_rate_test.cpp tests/search/prior_test.cpp
+    tests/search/selection_test.cpp tests/search/pruning_test.cpp tests/search/collisions_test.cpp tests/search/rules_test.cpp tests/search/commands_test.cpp tests/search/search_test.cpp tests/search/pipeline_test.cpp tests/search/lc0_options_test.cpp tests/search/lc0_parity_features_test.cpp tests/search/pick_stress_test.cpp tests/search/pick_queue_test.cpp tests/search/tablebase_test.cpp tests/selfplay/selfplay_test.cpp tests/uci/lc0_options_test.cpp tests/uci/commands_test.cpp tests/uci/score_test.cpp tests/uci/options_test.cpp tests/uci/session_test.cpp
         tests/uci/report_test.cpp tests/uci/time_test.cpp tests/uci/input_test.cpp tests/uci/input_request_test.cpp tests/uci/bench_test.cpp)
-  target_link_libraries(mouse_tests PRIVATE mouse_util mouse_chess mouse_nn mouse_search mouse_uci Catch2::Catch2WithMain)
+  target_link_libraries(mouse_tests PRIVATE mouse_util mouse_chess mouse_nn mouse_search mouse_uci mouse_selfplay Catch2::Catch2WithMain)
   mouse_target_options(mouse_tests)
   mouse_copy_ort_runtime(mouse_tests)
   add_dependencies(mouse_tests mouse_wrong_ort)
@@ -166,7 +209,10 @@ if(BUILD_TESTING)
     MOUSE_TEST_METADATA_DIRECTORY="${PROJECT_SOURCE_DIR}/tests/data/model-metadata"
     MOUSE_TEST_BACKEND_DIRECTORY="${PROJECT_SOURCE_DIR}/tests/data/backend"
     MOUSE_TEST_BENCH_DIRECTORY="${PROJECT_SOURCE_DIR}/tests/data/bench"
-    MOUSE_TEST_MODEL_PATH="${PROJECT_SOURCE_DIR}/tools/tests/data/toolchain.onnx")
+    MOUSE_TEST_MODEL_PATH="${PROJECT_SOURCE_DIR}/tools/tests/data/toolchain.onnx"
+    MOUSE_TEST_ENGINE_PATH="$<TARGET_FILE:mouse>")
+  # The TensorRT build-helper test runs the engine itself as the child process.
+  add_dependencies(mouse_tests mouse)
   add_executable(mouse_root_reset_allocation_test tests/search/root_reset_allocation_test.cpp)
   target_link_libraries(mouse_root_reset_allocation_test PRIVATE mouse_search)
   mouse_target_options(mouse_root_reset_allocation_test)
@@ -187,7 +233,7 @@ if(BUILD_TESTING)
   endif()
   add_test(NAME mouse.search.root-reset-allocation COMMAND mouse_root_reset_allocation_test)
   set_tests_properties(mouse.search.root-reset-allocation PROPERTIES LABELS "cpu;search;regression" TIMEOUT 60)
-  add_test(NAME mouse.unit COMMAND mouse_tests "~[gpu]~[.long]~[perft-gate]")
+  add_test(NAME mouse.unit COMMAND mouse_tests "~[gpu]~[directml]~[.long]~[perft-gate]")
   set_tests_properties(mouse.unit PROPERTIES LABELS "cpu;unit" TIMEOUT 120)
   if(WIN32)
     find_program(MOUSE_POWERSHELL_EXECUTABLE NAMES powershell.exe REQUIRED)
@@ -241,13 +287,16 @@ if(BUILD_TESTING)
     "-DMOUSE_PYTHON_EXECUTABLE=${Python3_EXECUTABLE}"
     "-DMOUSE_SOURCE_DIRECTORY=${PROJECT_SOURCE_DIR}"
     "-DMOUSE_TEST_DIRECTORY=${PROJECT_BINARY_DIR}/uci-protocol"
+    "-DMOUSE_BACKENDS=$<IF:$<BOOL:${MOUSE_ORT_DIRECTML}>,directml,gpu>"
     -P "${PROJECT_SOURCE_DIR}/tests/uci_protocol_test.cmake")
   set_tests_properties(mouse.uci.protocol PROPERTIES
     LABELS "cpu;uci;golden;integration" TIMEOUT 1500)
   add_test(NAME mouse.uci.options-docs COMMAND "${Python3_EXECUTABLE}" -I -c
     "import sys; sys.path.insert(0, sys.argv[1]); from mouse_tools.uci_options import main; raise SystemExit(main(sys.argv[2:]))"
     "${PROJECT_SOURCE_DIR}/tools/src"
-    --binary "$<TARGET_FILE:mouse>" --readme "${PROJECT_SOURCE_DIR}/README.md" --check)
+    --binary "$<TARGET_FILE:mouse>" --check
+    # DirectML builds offer other backends, so their options table lives in their own guide.
+    --readme "$<IF:$<BOOL:${MOUSE_ORT_DIRECTML}>,${PROJECT_SOURCE_DIR}/docs/DIRECTML.md,${PROJECT_SOURCE_DIR}/README.md>")
   set_tests_properties(mouse.uci.options-docs PROPERTIES LABELS "cpu;uci;docs" TIMEOUT 30)
   add_test(NAME mouse.chess.perft.full COMMAND mouse_tests "[perft-gate]")
   set_tests_properties(mouse.chess.perft.full PROPERTIES LABELS "cpu;chess;perft;gate" TIMEOUT 14400)
@@ -278,6 +327,12 @@ if(BUILD_TESTING)
       -P "${PROJECT_SOURCE_DIR}/tests/source_archive_test.cmake")
     set_tests_properties(mouse.source-archive PROPERTIES LABELS "cpu;integration" TIMEOUT 600 RUN_SERIAL TRUE)
   endif()
+  if(MOUSE_ORT_DIRECTML)
+    # Any Direct3D 12 GPU runs these, NVIDIA included.
+    add_test(NAME mouse.directml.provider COMMAND mouse_tests "[directml]")
+    set_tests_properties(mouse.directml.provider PROPERTIES
+      LABELS "gpu;directml" TIMEOUT 600 RUN_SERIAL TRUE RESOURCE_LOCK mouse_gpu)
+  endif()
   if(MOUSE_ENABLE_GPU_TESTS)
     add_test(NAME mouse.gpu.providers COMMAND mouse_tests "[gpu]")
     set_tests_properties(mouse.gpu.providers PROPERTIES
@@ -294,9 +349,18 @@ if(BUILD_TESTING)
 endif()
 
 install(TARGETS mouse RUNTIME DESTINATION .)
+if(MOUSE_TRT_MOE_PLUGIN)
+  install(TARGETS mouse_moe_trt RUNTIME DESTINATION .)
+  install(FILES "${MOUSE_CUTLASS_ROOT}/LICENSE.txt" DESTINATION licenses RENAME CUTLASS-LICENSE)
+endif()
 install(FILES ${MOUSE_ORT_RUNTIME_FILES} DESTINATION .)
 install(FILES "${MOUSE_ORT_ROOT}/LICENSE" DESTINATION licenses RENAME ONNXRuntime-LICENSE)
 install(FILES "${MOUSE_ORT_ROOT}/ThirdPartyNotices.txt" DESTINATION licenses)
+if(MOUSE_ORT_DIRECTML)
+  install(FILES "${MOUSE_ORT_ROOT}/DirectML-LICENSE.txt" "${MOUSE_ORT_ROOT}/DirectML-ThirdPartyNotices.txt"
+    DESTINATION licenses)
+  install(FILES "${PROJECT_SOURCE_DIR}/docs/DIRECTML.md" DESTINATION .)
+endif()
 
 install(FILES "${PROJECT_SOURCE_DIR}/LICENSE" "${PROJECT_SOURCE_DIR}/README.md"
   "${PROJECT_SOURCE_DIR}/CHANGELOG.md" DESTINATION .)

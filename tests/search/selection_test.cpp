@@ -8,10 +8,13 @@
 #include <cstdint>
 #include <limits>
 
+#include "engine/search/draw_rate.h"
+#include "tests/search/lc0_parameters.h"
+
 TEST_CASE("PUCT schedule has no extra visit and exploration uses N minus one",
           "[search][selection]") {
     using namespace mouse::search;
-    const SelectionParameters p;
+    const SelectionParameters p = mouse::test::kLc0Selection;
     REQUIRE(validate_selection_parameters(p));
     CHECK(cpuct_value(p, 0) == p.cpuct);
     CHECK(
@@ -92,12 +95,37 @@ TEST_CASE("FPU is absolute at root and reduction uses unclamped rounded visited 
             .epsilon(1e-14));
 }
 
+TEST_CASE("Mouse's search defaults are its tuned values and differ from Lc0's only there",
+          "[search][selection][defaults]") {
+    // The SPSA on M1.5 and its SPRT against Lc0's values (docs/LC0_DEFAULTS.md).
+    const mouse::search::SelectionParameters mouse;
+    CHECK(mouse.cpuct == 1.26);
+    CHECK(mouse.fpu_reduction == 0.323);
+    CHECK(mouse.policy_temperature == 1.352);
+    REQUIRE(mouse::search::validate_selection_parameters(mouse));
+    auto lc0 = mouse;
+    lc0.cpuct = mouse::test::kLc0Selection.cpuct;
+    lc0.fpu_reduction = mouse::test::kLc0Selection.fpu_reduction;
+    lc0.policy_temperature = mouse::test::kLc0Selection.policy_temperature;
+    const auto& expected = mouse::test::kLc0Selection;
+    CHECK(lc0.cpuct_base == expected.cpuct_base);
+    CHECK(lc0.cpuct_factor == expected.cpuct_factor);
+    CHECK(lc0.root_fpu == expected.root_fpu);
+    CHECK(lc0.root_fpu_strategy == expected.root_fpu_strategy);
+    const mouse::search::DrawRateParameters draw;
+    CHECK(draw.target == 0.779);
+    CHECK(draw.reference == 0.75);
+    CHECK(draw.max_s == mouse::test::kLc0DrawRate.max_s);
+    REQUIRE(mouse::search::validate_draw_rate_parameters(draw));
+    CHECK(mouse::search::draw_rate_ratio(draw) != 1.0F);
+}
+
 TEST_CASE("Default root FPU uses the same reduction as every other node",
           "[search][selection][root-fpu]") {
     const mouse::search::SelectionParameters p;
     for (const double parent_q : {-1.0, -0.5, 0.25, 1.0}) {
         for (const double mass : {0.0, 0.25, 0.75, 1.001}) {
-            const auto expected = parent_q - 0.330 * std::sqrt(mass);
+            const auto expected = parent_q - p.fpu_reduction * std::sqrt(mass);
             CHECK(mouse::search::first_play_urgency(p, true, parent_q, mass) ==
                   Catch::Approx(expected).epsilon(1e-14));
             CHECK(mouse::search::first_play_urgency(p, true, parent_q, mass) ==

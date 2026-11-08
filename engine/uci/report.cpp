@@ -10,9 +10,14 @@ void rank_report_roots(search::RootStatistics& roots, std::optional<chess::Move>
     std::stable_sort(
         roots.moves.begin(), roots.moves.begin() + static_cast<std::ptrdiff_t>(roots.size),
         [](const auto& a, const auto& b) {
-            return search::prefer_final_move(
-                {.visits = a.visits, .q = a.q, .prior = a.prior, .child_proof = a.child_proof},
-                {.visits = b.visits, .q = b.q, .prior = b.prior, .child_proof = b.child_proof});
+            return search::prefer_final_move({.visits = a.visits,
+                                              .q = a.q + a.draw_score_share,
+                                              .prior = a.prior,
+                                              .child_proof = a.child_proof},
+                                             {.visits = b.visits,
+                                              .q = b.q + b.draw_score_share,
+                                              .prior = b.prior,
+                                              .child_proof = b.child_proof});
         });
     const auto end = roots.moves.begin() + static_cast<std::ptrdiff_t>(roots.size);
     auto selected = std::find_if(roots.moves.begin(), end, [&](const auto& root) {

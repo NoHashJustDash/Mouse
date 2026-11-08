@@ -8,7 +8,10 @@ the legacy time manager and smart pruning, all re-implemented from lc0's source.
 After a measured 1 ms time loss at the raw GUI clock cap, Mouse also accounts for
 the cost of publishing its final output, without changing ordinary legacy
 allocations or constants; a 96-case timing capture passed at the original 15 ms /
-10 percent tolerance. This file lists each default and every place Mouse differs.
+10 percent tolerance. Since 2026-11-03 five search values are Mouse's own, tuned by SPSA
+for the M1.5 net and confirmed by an SPRT against lc0's values (+45.7 +/- 15.5 Elo at 10+0.1,
+612 games): CPuct, FpuValue, PolicyTemperature, WDLDrawRateTarget and WDLDrawRateReference.
+This file lists each default and every place Mouse differs.
 Strength results are in the README.
 
 The actual reference commands were:
@@ -42,19 +45,20 @@ defaults (for example CPuct1.745000 rather than the help display1.75).
 | SmartPruningMinimumBatches | 0 | Configurable0; source startup/early-win/resignability ordering | Source port implemented; gates open | Native option name verified in `classic/stoppers/common.cc`; `search/pruning.cpp` and fake-clock tests. Root visit statistics enumerate ALL legal edges as lc0 does, even with searchmoves. |
 | TimeManager | legacy | Stateful native curve, first-book-move bonus and saved-time bank, default slowmover/immediate-use1 | Source port implemented; gates open | `engine/uci/time.cpp`;96 actual-lc0 allocation captures within logger resolution, bank/reset/movetime regressions. Actual269730a,d5f666f,and corrected b324e2f captures each passed96/96 at the original tolerance; the [0,5] gainer was stopped and accepted at 114 games. |
 | MoveOverheadMs | 200 | 30 | No | Both native option catalogs. Gate matches explicitly select0 for both; this is a documented delivery reserve, not search tuning. |
-| MovesLeftMaxEffect | 0.034500 | 0.0345 | Yes, default constant | `engine/search/moves_left.cpp`; existing source-based utility regressions. |
-| MovesLeftThreshold | 0.800000 | 0.8 | Yes, default constant | Same. |
-| MovesLeftSlope | 0.002700 | 0.0027 | Yes, default constant | Same. |
-| MovesLeftConstantFactor | 0.000000 | 0 | Yes, default constant | Same. |
-| MovesLeftScaledFactor | 1.652100 | 1.6521 | Yes, default constant | Same. |
-| MovesLeftQuadraticFactor | -0.652100 | -0.6521 | Yes, default constant | Same. |
-| CPuct / CPuctAtRoot | 1.745000 /1.745000 | 1.745 for both | Yes, defaults | `engine/search/selection.h`; root-own-params is false in lc0. Formula parity is tested; lc0 FastLog and Mouse log1p are not represented as bit-identical. |
+| MovesLeftMaxEffect | 0.034500 | 0.0345, UCI option | Yes, default | `engine/search/moves_left.cpp`; existing source-based utility regressions and per-option regressions (2026-10-31). |
+| MovesLeftThreshold | 0.800000 | 0.8, UCI option | Yes, default | Same. |
+| MovesLeftSlope | 0.002700 | 0.0027, UCI option | Yes, default | Same. |
+| MovesLeftConstantFactor | 0.000000 | 0, UCI option | Yes, default | Same. |
+| MovesLeftScaledFactor | 1.652100 | 1.6521, UCI option | Yes, default | Same. |
+| MovesLeftQuadraticFactor | -0.652100 | -0.6521, UCI option | Yes, default | Same. |
+| WDLDrawRateTarget / WDLDrawRateReference / WDLMaxS | 0 / 0.500000 / 1.4 (only the reference is advertised; target and max S are pro-only in `params.cc`) | 0.779 / 0.75 / 1.4, all advertised UCI options | No: target and reference are Mouse's tuned values; WDLMaxS matches. Setting the target to 0 keeps raw WDL as in lc0 | `engine/search/draw_rate.cpp`: ratio from `params.cc` AccurateWDLRescaleParams with contempt off, forward `search.cc` WDLRescale on every network value (computed or cached) with the shared lc0 float fast math. Parity: 24 captures from the official lc0 executable match exactly (`tests/data/search/draw-rate-v1`). |
+| CPuct / CPuctAtRoot | 1.745000 /1.745000 | 1.26 for both | No: Mouse's tuned value; set 1.745 for lc0's | `engine/search/selection.h`; root-own-params is false in lc0. Formula parity is tested; lc0 FastLog and Mouse log1p are not represented as bit-identical. |
 | CPuctBase / CPuctBaseAtRoot | 38739.000000 /38739.000000 | 38739 for both | Yes, defaults | Same. |
 | CPuctFactor / CPuctFactorAtRoot | 3.894000 /3.894000 | 3.894 for both | Yes, defaults | Same. |
 | RootHasOwnCpuctParams | false | Shared parameters at root | Yes | Native catalog; selection configuration. |
-| FpuStrategy / FpuValue | reduction /0.330000 | reduction /0.330 | Yes, defaults | `engine/search/selection.cpp::first_play_urgency`. |
+| FpuStrategy / FpuValue | reduction /0.330000 | reduction /0.323 | Strategy yes; value is Mouse's tuned 0.323 | `engine/search/selection.cpp::first_play_urgency`. |
 | FpuStrategyAtRoot / FpuValueAtRoot | same /1.000000 | same /1.0 | Yes, defaults | Same: `same` inherits ordinary reduction; the root override is used only for an explicit root strategy. |
-| PolicyTemperature | 1.359000 | 1.359 | Yes, default | `engine/search/prior.cpp`; legal-policy parity against actual lc0 was checked independently. |
+| PolicyTemperature | 1.359000 | 1.352 | No: Mouse's tuned value; set 1.359 for lc0's | `engine/search/prior.cpp`; legal-policy parity against actual lc0 was checked independently. |
 | Threads / MinibatchSize | 0 /0, backend auto (CUDA: 2 search workers; batch 2 x SM count, 96 on RTX 5070) | 2 /0 (auto: 2 x SM count on GPU, 64 on CPU) | MinibatchSize: Yes (same rule, network_cuda.cc). Threads: Mouse threads are gather workers, not lc0 search workers; 2 measured best (2026-10-18 sweep) | Sweep 2026-10-18: batch 64 0.847x lc0, 96 0.950x, 96+2 threads 0.986-0.991x (idle machine, a714fff). |
 
 The original 256 MiB raw cache held 28,876 entries. Its replacement stores
