@@ -6,6 +6,9 @@
 #include <atomic>
 #include <catch2/catch_test_macros.hpp>
 #include <condition_variable>
+#include <filesystem>
+#include <fstream>
+#include <iterator>
 #include <mutex>
 #include <stdexcept>
 #include <string>
@@ -75,9 +78,11 @@ struct Harness {
     std::atomic<std::size_t> largest_batch{0};
     std::unique_ptr<mouse::uci::Session> session;
     explicit Harness(unsigned fail_at = 0, bool weights = true,
-                     std::function<void(const mouse::nn::BackendConfig&)> loading = {})
+                     std::function<void(const mouse::nn::BackendConfig&)> loading = {},
+                     mouse::uci::SearchAlgorithm algorithm = mouse::uci::SearchAlgorithm::Classic)
         : load_hook(std::move(loading)) {
         mouse::uci::Options options;
+        options.algorithm = algorithm;
         options.backend.kind = mouse::nn::BackendKind::Cpu;
         options.backend.precision = mouse::nn::ComputePrecision::Float32;
         options.auto_minibatch = false;
@@ -124,8 +129,99 @@ struct Harness {
             return std::ranges::any_of(lines, [&](const auto& s) { return s.starts_with(prefix); });
         });
     }
+    bool any_contains(std::string_view text) {
+        const std::lock_guard lock(mutex);
+        return std::ranges::any_of(
+            lines, [&](const auto& s) { return s.find(text) != std::string::npos; });
+    }
 };
 }  // namespace
+TEST_CASE("A proven root move reports mate as lc0 does", "[uci][session][lc0-options]") {
+    // Regression: Mouse reported every result in centipawns, so a mate in one read "cp 12800".
+    Harness h;
+    CHECK(h.send("position fen 6k1/5ppp/8/8/8/8/5PPP/R5K1 w - - 0 1"));
+    CHECK(h.send("go nodes 300"));
+    REQUIRE(h.wait("bestmove "));
+    CHECK(h.any_contains(" score mate 1"));
+    CHECK(h.any_contains("bestmove a1a8"));
+}
+TEST_CASE("A forced mate against the root player is negative", "[uci][session][lc0-options]") {
+    Harness h;
+    // Kb8 is black's only move, and Rh8 then mates.
+    CHECK(h.send("setoption name SmartPruningFactor value 0"));
+    CHECK(h.send("position fen k7/8/1K6/8/8/8/8/7R b - - 0 1"));
+    CHECK(h.send("go nodes 200"));
+    REQUIRE(h.wait("bestmove "));
+    CHECK(h.any_contains("bestmove a8b8"));
+    CHECK(h.any_contains(" score mate -1"));
+}
+TEST_CASE("Display options change what info lines say", "[uci][session][lc0-options]") {
+    Harness h;
+    CHECK(h.send("setoption name ScoreType value W-L"));
+    // Raw network values, so that the score below is the fixture's own.
+    CHECK(h.send("setoption name WDLDrawRateTarget value 0"));
+    CHECK(h.send("setoption name VerboseMoveStats value true"));
+    CHECK(h.send("setoption name PerPVCounters value true"));
+    CHECK(h.send("position startpos"));
+    // One node is the root's own network value: W-L of 0.5, 0.25, 0.25 from the fixture.
+    CHECK(h.send("go nodes 1"));
+    REQUIRE(h.wait("bestmove "));
+    CHECK(h.any_contains(" score cp 2500"));
+    h.lines.clear();
+    CHECK(h.send("go nodes 50"));
+    REQUIRE(h.wait("bestmove "));
+    CHECK(h.any_contains("info string e2e4"));
+    CHECK(h.any_contains("info string node "));
+    CHECK(h.any_contains("(WL: "));
+    CHECK(h.any_contains("(P: "));
+    CHECK_FALSE(h.any_contains(" nodes 50 nps"));
+}
+TEST_CASE("LogFile records both directions, and a bad path is reported", "[uci][session][lc0-options]") {
+    const auto path = std::filesystem::temp_directory_path() / "mouse-session-test.log";
+    std::filesystem::remove(path);
+    {
+        Harness h;
+        CHECK(h.send("setoption name LogFile value " + path.generic_string()));
+        CHECK(h.send("isready"));
+        REQUIRE(h.wait("readyok"));
+        CHECK(h.send("setoption name LogFile value <empty>"));
+        CHECK(h.send("setoption name LogFile value C:/no/such/directory/at/all.log"));
+        CHECK(h.any_contains("Cannot open LogFile"));
+    }
+    std::ifstream input(path);
+    std::string text((std::istreambuf_iterator<char>(input)), std::istreambuf_iterator<char>());
+    CHECK(text.find(">> isready") != std::string::npos);
+    CHECK(text.find("<< readyok") != std::string::npos);
+    input.close();
+    std::filesystem::remove(path);
+}
+TEST_CASE("Policyhead plays from one evaluation", "[uci][session][lc0-options]") {
+    Harness h{0, true, {}, mouse::uci::SearchAlgorithm::PolicyHead};
+    CHECK(h.send("position startpos"));
+    CHECK(h.send("go nodes 1000"));
+    REQUIRE(h.wait("bestmove "));
+    CHECK(h.any_contains("info depth 1 seldepth 1 nodes 1 score cp"));
+    CHECK(h.count("info depth") == 1);
+    CHECK(h.calls.load() == 1);
+}
+TEST_CASE("Valuehead evaluates every move and takes a mate", "[uci][session][lc0-options]") {
+    Harness h{0, true, {}, mouse::uci::SearchAlgorithm::ValueHead};
+    CHECK(h.send("position fen 6k1/5ppp/8/8/8/8/5PPP/R5K1 w - - 0 1"));
+    CHECK(h.send("go nodes 1"));
+    REQUIRE(h.wait("bestmove "));
+    CHECK(h.any_contains("bestmove a1a8"));
+    CHECK(h.any_contains(" score mate 1"));
+    CHECK(h.count("info depth") == 1);
+}
+TEST_CASE("Valuehead with no mate splits positions into backend batches", "[uci][session][lc0-options]") {
+    Harness h{0, true, {}, mouse::uci::SearchAlgorithm::ValueHead};
+    CHECK(h.send("position startpos"));
+    CHECK(h.send("go nodes 1"));
+    REQUIRE(h.wait("bestmove "));
+    CHECK(h.any_contains("info depth 1 seldepth 1 nodes 20 score cp"));
+    CHECK(h.largest_batch.load() <= 4);
+    CHECK(h.calls.load() == 5);
+}
 TEST_CASE("UCI handshakes and missing model remain explicit and recoverable", "[uci][session]") {
     Harness h{0, false};
     CHECK(h.send("uci"));
@@ -1168,9 +1264,9 @@ TEST_CASE("Search statistics are opt-in and emitted once after each drained move
     const auto found = std::ranges::find_if(
         h.lines, [](const auto& line) { return line.starts_with("info string searchstats "); });
     REQUIRE(found != h.lines.end());
-    for (const auto field :
-         {"batches ", "mean ", "p50 ", "max ", "collisions ", "ooo ", "gather_ms ", "nn_wait_ms ",
-          "backup_ms ", "gpu_idle_ms ", "idle_basis host_provider_gaps"})
+    for (const auto field : {"batches ", "mean ", "p50 ", "max ", "collisions ", "ooo ",
+                             "twofold_reverts ", "gather_ms ", "nn_wait_ms ", "backup_ms ",
+                             "gpu_idle_ms ", "idle_basis host_provider_gaps"})
         CHECK(found->find(field) != std::string::npos);
 }
 

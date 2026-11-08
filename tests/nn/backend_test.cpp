@@ -452,6 +452,129 @@ TEST_CASE("Native TensorRT graph buckets refresh changed inputs and reuse verifi
     run_gpu_backend(BackendKind::TensorRt);
 }
 
+#if MOUSE_TRT_MOE_PLUGIN
+TEST_CASE("TensorRT builds Mouse-MoE plugin engines after earlier backends end",
+          "[nn][backend-gpu][gpu][trt-moe-plugin]") {
+    // ORT 1.22 deletes its shared trt.plugins domain when a TensorRT session ends; the
+    // next uncached plugin build then read freed ops (access violation by the third
+    // backend here). Each backend ends before the next one is built.
+    const TestDirectory temporary;
+    auto config = cpu_config();
+    config.kind = BackendKind::TensorRt;
+    config.precision = ComputePrecision::Float16;
+    config.model_path = fixture("moe-tiny.onnx");
+    config.gpu_dll_directories = configured_gpu_directories();
+    config.cache_directory = temporary.path();
+    for (const std::size_t batch :
+         {std::size_t{8}, std::size_t{16}, std::size_t{24}, std::size_t{32}}) {
+        INFO("bucket " << batch);
+        config.batch_buckets = {batch};
+        const auto created = mouse::nn::create_backend(config);
+        if (!created) FAIL(created.error());
+        std::vector<InputPlanes> inputs(batch, input(0.5F));
+        std::vector<NNOutput> outputs(batch);
+        const auto result = (*created)->evaluate(inputs, outputs);
+        if (!result) FAIL(result.error());
+    }
+}
+TEST_CASE("A TensorRT build helper compiles missing engines and this process only loads them",
+          "[nn][backend-gpu][gpu][tensorrt-builder]") {
+    const TestDirectory temporary;
+    auto config = cpu_config();
+    config.kind = BackendKind::TensorRt;
+    config.precision = ComputePrecision::Float16;
+    config.model_path = fixture("moe-tiny.onnx");
+    config.gpu_dll_directories = configured_gpu_directories();
+    config.cache_directory = temporary.path();
+    config.batch_buckets = {1, 8};
+    config.tensorrt_builder = MOUSE_TEST_ENGINE_PATH;
+    std::vector<std::string> progress;
+    config.initialization_progress = [&progress](std::string_view text) {
+        progress.emplace_back(text);
+    };
+    const auto contains = [&progress](std::string_view text) {
+        return std::ranges::any_of(progress, [&](const std::string& line) { return line == text; });
+    };
+    for (const bool cold : {true, false}) {
+        INFO((cold ? "cold" : "warm"));
+        progress.clear();
+        const auto created = mouse::nn::create_backend(config);
+        if (!created) FAIL(created.error());
+        // The child relays its own per-bucket build lines; a warm load starts no child.
+        CHECK(contains("TensorRT cold startup: building engines in a helper process") == cold);
+        CHECK(contains("TensorRT cold startup: building bucket 8") == cold);
+        CHECK(contains("TensorRT cache ready") == cold);
+        std::vector<InputPlanes> inputs(5, input(0.25F));
+        std::vector<NNOutput> outputs(5);
+        const auto result = (*created)->evaluate(inputs, outputs);
+        if (!result) FAIL(result.error());
+    }
+    // A builder that cannot run fails the load; the engine is not compiled here instead.
+    const TestDirectory other;
+    config.cache_directory = other.path();
+    config.tensorrt_builder = other.path() / "absent-mouse.exe";
+    const auto failed = mouse::nn::create_backend(config);
+    REQUIRE_FALSE(failed);
+    CHECK(failed.error().find("TensorRT build helper") != std::string::npos);
+}
+#endif
+
+TEST_CASE("Each build accepts only the GPU providers its ONNX Runtime contains", "[nn][backend]") {
+    auto config = cpu_config();
+#if MOUSE_DIRECTML
+    config.kind = BackendKind::Cuda;
+    const std::string_view expected = "runs the directml and cpu backends only";
+#else
+    config.kind = BackendKind::DirectMl;
+    const std::string_view expected = "needs a DirectML build";
+#endif
+    const auto created = mouse::nn::create_backend(config);
+    REQUIRE_FALSE(created);
+    CHECK(created.error().find(expected) != std::string::npos);
+}
+#if MOUSE_DIRECTML
+TEST_CASE("DirectML buckets refresh changed host-bound inputs", "[nn][backend-gpu][directml]") {
+    auto config = cpu_config();
+    config.kind = BackendKind::DirectMl;
+    const auto created = mouse::nn::create_backend(config);
+    if (!created) FAIL(created.error());
+    CHECK((*created)->physical_batch_size(1) == 1);
+    CHECK((*created)->physical_batch_size(3) == 4);
+    CHECK((*created)->physical_batch_size(5) == 8);
+    const auto& info = (*created)->info();
+    CHECK(info.provider == "DmlExecutionProvider");
+    REQUIRE_FALSE(info.device_name.empty());
+    CHECK(info.device_uuid.starts_with("pci-"));
+    REQUIRE_FALSE(info.driver_version.empty());
+    for (const auto& values :
+         {std::vector{0.25F, -0.5F, 1.0F}, std::vector{-0.5F},
+          std::vector{0.0F, 0.25F, -0.25F, 0.5F, 1.0F}, std::vector{0.5F, 0.0F, -0.5F},
+          std::vector{-0.75F, 0.125F, 0.375F}, std::vector{0.125F},
+          std::vector{-0.25F, 0.0F, 0.25F, -0.5F, 0.75F}}) {
+        std::vector<InputPlanes> inputs;
+        inputs.reserve(values.size());
+        for (const auto value : values) inputs.push_back(input(value));
+        std::vector<NNOutput> outputs(values.size());
+        const auto result = (*created)->evaluate(inputs, outputs);
+        if (!result) FAIL(result.error());
+        for (std::size_t row = 0; row < values.size(); ++row)
+            check_row(outputs.at(row), values.at(row));
+    }
+    std::cout << "MOUSE_BACKEND_DIRECTML device=" << info.device_name << " id=" << info.device_uuid
+              << " driver=" << info.driver_version << " batches=3,1,5,3,3,1,5\n";
+}
+TEST_CASE("DirectML names the adapters when the device ordinal is past the last GPU",
+          "[nn][backend-gpu][directml]") {
+    auto config = cpu_config();
+    config.kind = BackendKind::DirectMl;
+    config.device_id = 64;
+    const auto created = mouse::nn::create_backend(config);
+    REQUIRE_FALSE(created);
+    CHECK(created.error().find("does not exist; adapters by performance: 0: ") !=
+          std::string::npos);
+}
+#endif
+
 TEST_CASE("Explicit GPU library selection searches only validated directories", "[nn][backend]") {
     const TestDirectory temporary;
     const auto first = temporary.path() / "first";
@@ -1037,4 +1160,53 @@ TEST_CASE("TensorRT cache waiters serialize initialization and validate the owne
         CHECK(error.empty());
         CHECK(reused);
     }
+}
+
+TEST_CASE("TensorRT loads the Mouse-MoE plugin only from beside the runtime library",
+          "[nn][backend][trt-moe-plugin]") {
+    const TestDirectory directory;
+    mouse::nn::BackendConfig config;
+    config.runtime_path = directory.path() / "onnxruntime.dll";
+    for (const auto kind : {mouse::nn::BackendKind::Cpu, mouse::nn::BackendKind::Cuda}) {
+        config.kind = kind;
+        CHECK_FALSE(mouse::nn::detail::trt_moe_plugin(config).has_value());
+    }
+    config.kind = mouse::nn::BackendKind::TensorRt;
+#if MOUSE_TRT_MOE_PLUGIN
+#ifdef _WIN32
+    const auto expected = directory.path() / "mouse_moe_trt.dll";
+#else
+    const auto expected = directory.path() / "libmouse_moe_trt.so";
+#endif
+    // A plugin build never searches PATH or continues without the plugin.
+    CHECK_THROWS_AS(mouse::nn::detail::trt_moe_plugin(config), std::runtime_error);
+    write_text(expected, "plugin");
+    const auto plugin = mouse::nn::detail::trt_moe_plugin(config);
+    REQUIRE(plugin.has_value());
+    CHECK(*plugin == expected);
+#else
+    CHECK_FALSE(mouse::nn::detail::trt_moe_plugin(config).has_value());
+#endif
+}
+
+TEST_CASE("Policy validation rejects a non-finite logit at any index", "[nn][output]") {
+    mouse::nn::NNOutput value{};
+    value.policy_logits.fill(0.25F);
+    value.wdl = {0.5F, 0.25F, 0.25F};
+    value.moves_left = 30.0F;
+    REQUIRE(mouse::nn::validate_nn_output(value));
+    for (const std::size_t index :
+         {std::size_t{0}, std::size_t{7}, std::size_t{928}, std::size_t{1857}})
+        for (const float bad :
+             {std::numeric_limits<float>::quiet_NaN(), std::numeric_limits<float>::infinity(),
+              -std::numeric_limits<float>::infinity()}) {
+            auto broken = value;
+            broken.policy_logits.at(index) = bad;
+            CHECK_FALSE(mouse::nn::validate_nn_output(broken));
+        }
+    auto extreme = value;
+    extreme.policy_logits.front() = std::numeric_limits<float>::max();
+    extreme.policy_logits.back() = -std::numeric_limits<float>::max();
+    extreme.policy_logits.at(1) = std::numeric_limits<float>::denorm_min();
+    CHECK(mouse::nn::validate_nn_output(extreme));
 }

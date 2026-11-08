@@ -18,6 +18,7 @@
 #include "engine/nn/history.h"
 #include "engine/nn/legal_cache.h"
 #include "engine/search/search.h"
+#include "tests/search/lc0_parameters.h"
 
 namespace {
 struct AllocationRecord {
@@ -155,7 +156,7 @@ int main() {
             tree.edges(*keep)[0].child = *leaf;
             tree.node(*leaf).visits = 17;
             const auto live = tree.stats().node_count;
-            const auto capacity = tree.stats().node_capacity;
+            const auto capacity = tree.stats().node_limit;
             constexpr auto marker = std::byte{0xa5};
             std::array<std::span<std::byte>, 2> tails{};
             std::size_t tail_count = 0;
@@ -191,6 +192,10 @@ int main() {
         config.threads = 4;
         config.max_depth = 64;
         config.ram_limit_bytes = 64U << 20U;
+        // The provider scores every position alike. With Mouse's focused defaults 257 playouts
+        // settle on a repetition draw (about 21 tree nodes); Lc0's values spread the tree.
+        config.selection = mouse::test::kLc0Selection;
+        config.draw_rate = mouse::test::kLc0DrawRate;
         auto root = mouse::chess::Position::from_fen(mouse::chess::kStartFen, attacks);
         auto other = mouse::chess::Position::from_fen("4k3/8/8/8/8/8/P7/R3K3 b - - 0 1", attacks);
         if (!root || !other) return 1;
@@ -275,7 +280,8 @@ int main() {
         // recovered tree but less than one retained old frame buffer. Derive
         // the boundary from actual scratch charge: gather layouts can change
         // without changing the replacement-peak contract tested below.
-        const auto context_count = config.threads + 1;
+        // History contexts: one per worker thread, the coordinator's, and the root.
+        const auto context_count = config.threads + 2;
         const auto history_budget = config.ram_limit_bytes - fixed_bytes;
         const auto target_frames =
             (history_budget - history_budget / 20) /

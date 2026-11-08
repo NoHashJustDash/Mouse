@@ -74,6 +74,8 @@ std::string_view provider_name(nn::BackendKind kind) {
             return "CUDAExecutionProvider";
         case nn::BackendKind::TensorRt:
             return "TensorrtExecutionProvider";
+        case nn::BackendKind::DirectMl:
+            return "DmlExecutionProvider";
     }
     return {};
 }

@@ -14,6 +14,8 @@ struct PruningSample {
     std::span<const std::uint64_t> root_visits;
     std::size_t losing_moves = 0;
     bool win_found = false, may_resign = true;
+    // Lc0 StoppersHints::GetEstimatedNps: a time manager that knows better than the formula.
+    std::optional<double> nps;
 };
 // Source behavior: lc0 v0.32.1 classic/stoppers/stoppers.cc SmartPruningStopper.
 // One search owner supplies explicit samples; no wall clock or allocation here.

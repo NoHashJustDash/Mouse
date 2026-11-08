@@ -10,6 +10,9 @@ namespace mouse::search {
 enum class TerminalReason : std::uint8_t;
 enum class ProofOutcome : std::uint8_t { Unknown, Win, Draw, Loss };
 inline constexpr std::uint16_t kMaximumProofPlies = 512;
+// The proof distance given to a tablebase result: longer than almost any real mate, which keeps
+// those ahead of it, with room below kMaximumProofPlies for the plies above it in the tree.
+inline constexpr std::uint16_t kTablebaseMateDistance = 400;
 // Outcome uses this node's side-to-move viewpoint. A mate upper bound is an
 // established strategy bound, not shortest DTM while unknown children remain.
 // Unknown/Draw have bound0; Loss0 is a genuinely checkmated position.

@@ -48,7 +48,16 @@ TEST_CASE("UCI options advertise actual conservative defaults", "[uci][options]"
                             "CpuThreads",
                             "WorkspaceMb",
                             "Deterministic",
-                            "CacheHistoryLength"}) {
+                            "CacheHistoryLength",
+                            "MovesLeftMaxEffect",
+                            "MovesLeftThreshold",
+                            "MovesLeftSlope",
+                            "MovesLeftConstantFactor",
+                            "MovesLeftScaledFactor",
+                            "MovesLeftQuadraticFactor",
+                            "WDLDrawRateTarget",
+                            "WDLDrawRateReference",
+                            "WDLMaxS"}) {
         CHECK(std::ranges::any_of(lines, [&](const std::string& line) {
             return line.starts_with("option name " + std::string{name} + " type ");
         }));
@@ -83,8 +92,35 @@ TEST_CASE("UCI configuration updates are atomic and identify owner rebuilds", "[
     CHECK(det->impact == mouse::uci::Reconfigure::Backend);
     CHECK_FALSE(apply(det->options, "CpuThreads", "2"));
 }
+TEST_CASE("Moves-left options default to lc0, draw-rate options to Mouse's tuned values",
+          "[uci][options]") {
+    const mouse::uci::Options original;
+    CHECK(original.search.moves_left == mouse::search::MovesLeftParameters{});
+    CHECK(original.search.draw_rate == mouse::search::DrawRateParameters{});
+    const auto lines = mouse::uci::option_lines(original);
+    for (const auto expected : {"option name MovesLeftMaxEffect type string default 0.0345",
+                                "option name MovesLeftThreshold type string default 0.8",
+                                "option name MovesLeftSlope type string default 0.0027",
+                                "option name MovesLeftConstantFactor type string default 0",
+                                "option name MovesLeftScaledFactor type string default 1.6521",
+                                "option name MovesLeftQuadraticFactor type string default -0.6521",
+                                "option name WDLDrawRateTarget type string default 0.779",
+                                "option name WDLDrawRateReference type string default 0.75",
+                                "option name WDLMaxS type string default 1.4"}) {
+        INFO(expected);
+        CHECK(std::ranges::find(lines, std::string{expected}) != lines.end());
+    }
+    const auto target = apply(original, "WDLDrawRateTarget", "0.62");
+    REQUIRE(target);
+    CHECK(target->options.search.draw_rate.target == 0.62);
+    CHECK(target->impact == mouse::uci::Reconfigure::Search);
+    const auto slope = apply(original, "movesleftslope", "0.004");
+    REQUIRE(slope);
+    CHECK(slope->options.search.moves_left.slope == 0.004);
+    CHECK(slope->impact == mouse::uci::Reconfigure::Search);
+}
 TEST_CASE("Every advertised UCI option parses a valid value", "[uci][options]") {
-    constexpr std::array<std::array<std::string_view, 2>, 23> valid{
+    constexpr std::array<std::array<std::string_view, 2>, 32> valid{
         {{"WeightsFile", "T1 model.onnx"},
          {"Backend", "cpu"},
          {"Precision", "fp32"},
@@ -98,6 +134,15 @@ TEST_CASE("Every advertised UCI option parses a valid value", "[uci][options]") 
          {"CPuctFactor", "0"},
          {"FpuValue", "0.2"},
          {"PolicyTemperature", "1.2"},
+         {"MovesLeftMaxEffect", "0.05"},
+         {"MovesLeftThreshold", "0.7"},
+         {"MovesLeftSlope", "0.004"},
+         {"MovesLeftConstantFactor", "0.1"},
+         {"MovesLeftScaledFactor", "1.2"},
+         {"MovesLeftQuadraticFactor", "-0.3"},
+         {"WDLDrawRateTarget", "0.6"},
+         {"WDLDrawRateReference", "0.55"},
+         {"WDLMaxS", "1.6"},
          {"MultiPV", "3"},
          {"UCI_ShowWDL", "true"},
          {"UCI_Chess960", "true"},
@@ -116,28 +161,37 @@ TEST_CASE("Every advertised UCI option parses a valid value", "[uci][options]") 
     CHECK(apply(original, "GpuDllDirectories", "<empty>"));
 }
 TEST_CASE("Invalid UCI options never mutate active settings", "[uci][options]") {
-    constexpr std::array<std::array<std::string_view, 2>, 22> invalid{{{"Unknown", "3"},
-                                                                       {"Threads", "0"},
-                                                                       {"Threads", "129"},
-                                                                       {"CacheHistoryLength", "8"},
-                                                                       {"CacheHistoryLength", "-1"},
-                                                                       {"MinibatchSize", "1025"},
-                                                                       {"NNCacheSize", "-1"},
-                                                                       {"RamLimitMb", "0"},
-                                                                       {"MultiPV", "0"},
-                                                                       {"MultiPV", "257"},
-                                                                       {"CPuct", "nan"},
-                                                                       {"CPuctBase", "0"},
-                                                                       {"CPuctFactor", "-1"},
-                                                                       {"FpuValue", "-1"},
-                                                                       {"PolicyTemperature", "0"},
-                                                                       {"MoveOverheadMs", "-1"},
-                                                                       {"Device", "1024"},
-                                                                       {"CpuThreads", "129"},
-                                                                       {"WorkspaceMb", "0"},
-                                                                       {"Backend", "auto"},
-                                                                       {"Precision", "auto"},
-                                                                       {"Ponder", "maybe"}}};
+    constexpr std::array<std::array<std::string_view, 2>, 30> invalid{
+        {{"Unknown", "3"},
+         {"Threads", "0"},
+         {"Threads", "129"},
+         {"CacheHistoryLength", "8"},
+         {"CacheHistoryLength", "-1"},
+         {"MinibatchSize", "1025"},
+         {"NNCacheSize", "-1"},
+         {"RamLimitMb", "0"},
+         {"MultiPV", "0"},
+         {"MultiPV", "257"},
+         {"CPuct", "nan"},
+         {"CPuctBase", "0"},
+         {"CPuctFactor", "-1"},
+         {"FpuValue", "-1"},
+         {"PolicyTemperature", "0"},
+         {"MovesLeftMaxEffect", "1.5"},
+         {"MovesLeftThreshold", "-0.1"},
+         {"MovesLeftSlope", "2"},
+         {"MovesLeftConstantFactor", "-2"},
+         {"MovesLeftScaledFactor", "3"},
+         {"WDLDrawRateTarget", "1"},
+         {"WDLDrawRateReference", "0"},
+         {"WDLMaxS", "11"},
+         {"MoveOverheadMs", "-1"},
+         {"Device", "1024"},
+         {"CpuThreads", "129"},
+         {"WorkspaceMb", "0"},
+         {"Backend", "auto"},
+         {"Precision", "auto"},
+         {"Ponder", "maybe"}}};
     const mouse::uci::Options original;
     for (const auto& pair : invalid) {
         INFO(pair[0]);
@@ -204,7 +258,7 @@ TEST_CASE("Root FPU UCI changes are atomic search rebuilds and startup settings 
     using mouse::search::RootFpuStrategy;
     const mouse::uci::Options original;
     CHECK(original.search.selection.root_fpu_strategy == RootFpuStrategy::Same);
-    CHECK(original.search.selection.fpu_reduction == 0.33);
+    CHECK(original.search.selection.fpu_reduction == 0.323);
     CHECK(original.search.selection.root_fpu == 1.0);
     const auto changed = apply(original, "FpuStrategyAtRoot", "absolute");
     REQUIRE(changed);

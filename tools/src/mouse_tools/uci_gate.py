@@ -470,9 +470,14 @@ def parse_info(line: str) -> dict[str, object]:
             1 if key == "multipv" else 0,
             1000 if key == "hashfull" else 512 if key in ("depth", "seldepth") else (1 << 64) - 1,
         )
-    if len(fields) < 3 or fields[:2] != ["score", "cp"]:
-        raise UciGateError("Expected explicit score cp, never an inferred mate score")
-    result["score_cp"] = _integer(fields[2], -(1 << 31), (1 << 31) - 1)
+    if len(fields) < 3 or fields[0] != "score" or fields[1] not in ("cp", "mate"):
+        raise UciGateError("Expected an explicit score cp or score mate")
+    if fields[1] == "cp":
+        result["score_cp"] = _integer(fields[2], -(1 << 31), (1 << 31) - 1)
+    else:
+        result["score_mate"] = _integer(fields[2].removeprefix("-"), 1, 1 << 16)
+        if fields[2].startswith("-"):
+            result["score_mate"] = -cast(int, result["score_mate"])
     del fields[:3]
     if fields and fields[0] == "wdl":
         if len(fields) < 4:
@@ -523,6 +528,15 @@ OPTION_TYPES: Mapping[str, tuple[str, int | None, int | None]] = MappingProxyTyp
         "FpuStrategyAtRoot": ("combo", None, None),
         "FpuValueAtRoot": ("string", None, None),
         "PolicyTemperature": ("string", None, None),
+        "MovesLeftMaxEffect": ("string", None, None),
+        "MovesLeftThreshold": ("string", None, None),
+        "MovesLeftSlope": ("string", None, None),
+        "MovesLeftConstantFactor": ("string", None, None),
+        "MovesLeftScaledFactor": ("string", None, None),
+        "MovesLeftQuadraticFactor": ("string", None, None),
+        "WDLDrawRateTarget": ("string", None, None),
+        "WDLDrawRateReference": ("string", None, None),
+        "WDLMaxS": ("string", None, None),
         "MultiPV": ("spin", 1, 256),
         "UCI_ShowWDL": ("check", None, None),
         "UCI_Chess960": ("check", None, None),
@@ -537,6 +551,58 @@ OPTION_TYPES: Mapping[str, tuple[str, int | None, int | None]] = MappingProxyTyp
         "CpuThreads": ("spin", 1, 128),
         "WorkspaceMb": ("spin", 1, 16384),
         "Deterministic": ("check", None, None),
+        "MaxCollisionEvents": ("spin", 1, 65536),
+        "MaxCollisionVisits": ("spin", 1, 100000000),
+        "MaxCollisionVisitsScalingStart": ("spin", 1, 100000),
+        "MaxCollisionVisitsScalingEnd": ("spin", 0, 100000000),
+        "MaxCollisionVisitsScalingPower": ("string", None, None),
+        "OutOfOrderEval": ("check", None, None),
+        "MaxOutOfOrderEvalsFactor": ("string", None, None),
+        "MaxPrefetch": ("spin", 0, 1024),
+        "IdlingMinimumWork": ("spin", 0, 10000),
+        "ThreadIdlingThreshold": ("spin", 0, 128),
+        "MinimumProcessingWork": ("spin", 2, 100000),
+        "MinimumPerTaskProcessing": ("spin", 1, 100000),
+        "MinimumPickingWork": ("spin", 1, 100000),
+        "MinimumRemainingPickingWork": ("spin", 0, 100000),
+        "SolidTreeThreshold": ("spin", 1, 2000000000),
+        "Temperature": ("string", None, None),
+        "TempDecayMoves": ("spin", 0, 640),
+        "TempDecayDelayMoves": ("spin", 0, 100),
+        "TempCutoffMove": ("spin", 0, 1000),
+        "TempEndgame": ("string", None, None),
+        "TempValueCutoff": ("string", None, None),
+        "TempVisitOffset": ("string", None, None),
+        "DirichletNoiseEpsilon": ("string", None, None),
+        "DirichletNoiseAlpha": ("string", None, None),
+        "TaskWorkers": ("spin", -1, 128),
+        "MaxConcurrentSearchers": ("spin", 0, 128),
+        "SearchSpinBackoff": ("check", None, None),
+        "TwoFoldDraws": ("check", None, None),
+        "StickyEndgames": ("check", None, None),
+        "FpuStrategy": ("combo", None, None),
+        "HistoryFill": ("combo", None, None),
+        "DrawScore": ("string", None, None),
+        "NodesPerSecondLimit": ("string", None, None),
+        "Contempt": ("string", None, None),
+        "ContemptMode": ("combo", None, None),
+        "ContemptMaxValue": ("string", None, None),
+        "WDLContemptAttenuation": ("string", None, None),
+        "WDLBookExitBias": ("string", None, None),
+        "WDLCalibrationElo": ("string", None, None),
+        "WDLEvalObjectivity": ("string", None, None),
+        "UCI_Opponent": ("string", None, None),
+        "UCI_RatingAdv": ("string", None, None),
+        "ScoreType": ("combo", None, None),
+        "PerPVCounters": ("check", None, None),
+        "UCI_ShowMovesLeft": ("check", None, None),
+        "VerboseMoveStats": ("check", None, None),
+        "LogFile": ("string", None, None),
+        "ConfigFile": ("string", None, None),
+        "TimeManager": ("string", None, None),
+        "BackendOptions": ("string", None, None),
+        "SyzygyPath": ("string", None, None),
+        "SyzygyFastPlay": ("check", None, None),
     }
 )
 REAL_OPTIONS = frozenset(
@@ -547,14 +613,39 @@ REAL_OPTIONS = frozenset(
         "FpuValue",
         "FpuValueAtRoot",
         "PolicyTemperature",
+        "MovesLeftMaxEffect",
+        "MovesLeftThreshold",
+        "MovesLeftSlope",
+        "MovesLeftConstantFactor",
+        "MovesLeftScaledFactor",
+        "MovesLeftQuadraticFactor",
+        "WDLDrawRateTarget",
+        "WDLDrawRateReference",
+        "WDLMaxS",
         "SmartPruningFactor",
+        "MaxCollisionVisitsScalingPower",
+        "MaxOutOfOrderEvalsFactor",
+        "DrawScore",
+        "NodesPerSecondLimit",
+        "ContemptMaxValue",
+        "WDLContemptAttenuation",
+        "WDLBookExitBias",
+        "WDLCalibrationElo",
+        "WDLEvalObjectivity",
+        "UCI_RatingAdv",
     )
 )
+
+
+# Backend combo variants by build: the CUDA/TensorRT ONNX Runtime package, or DirectML's
+# (CMake preset windows-dml), whose ONNX Runtime has no CUDA or TensorRT provider.
+BACKEND_VARIANTS = {"gpu": " var cpu var cuda var tensorrt", "directml": " var cpu var directml"}
 
 
 def validate_handshake(
     lines: Sequence[str],
     expected: Mapping[str, str],
+    backends: str = "gpu",
 ) -> dict[str, dict[str, object]]:
     if (
         len(lines) != len(OPTION_TYPES) + 3
@@ -573,19 +664,29 @@ def validate_handshake(
         if kind != required_kind:
             raise UciGateError("Option type differs from the fixed protocol contract")
         if kind == "spin":
-            bound = re.fullmatch(r"([0-9]+) min ([0-9]+) max ([0-9]+)", value)
+            bound = re.fullmatch(r"(-?[0-9]+) min (-?[0-9]+) max ([0-9]+)", value)
             if bound is None or int(bound[2]) != minimum or int(bound[3]) != maximum:
                 raise UciGateError("Option spin bounds differ from the fixed contract")
             assert minimum is not None and maximum is not None
-            _integer(bound[1], minimum, maximum)
+            if not minimum <= int(bound[1]) <= maximum:
+                raise UciGateError("Option spin default is outside its bounds")
             value = bound[1]
         elif kind == "check" and value not in ("true", "false"):
             raise UciGateError("Option check default must be a strict boolean")
         elif kind == "combo":
             variants = {
-                "Backend": " var cpu var cuda var tensorrt",
+                "Backend": BACKEND_VARIANTS[backends],
                 "Precision": " var fp32 var fp16",
                 "FpuStrategyAtRoot": " var same var reduction var absolute",
+                "FpuStrategy": " var reduction var absolute",
+                "HistoryFill": " var no var fen_only var always",
+                "ContemptMode": (
+                    " var play var white_side_analysis var black_side_analysis var disable"
+                ),
+                "ScoreType": (
+                    " var centipawn var centipawn_with_drawscore var centipawn_2019"
+                    " var centipawn_2018 var win_percentage var Q var W-L var WDL_mu"
+                ),
             }[name]
             if not value.endswith(variants):
                 raise UciGateError("Option combo variants differ from the fixed contract")
@@ -673,8 +774,11 @@ class GateConfig:
     spec_dir: Path = Path("tests/data/uci/protocol-v1")
     timeout: float = 10
     case_timeout: float = 60
+    backends: str = "gpu"
 
     def validate(self) -> None:
+        if self.backends not in BACKEND_VARIANTS:
+            raise UciGateError("Unknown backend build variant")
         _positive(self.timeout, "step deadline")
         _positive(self.case_timeout, "case deadline", 900)
         if self.case_timeout < self.timeout:
@@ -924,13 +1028,13 @@ class Driver:
             deadline = time.monotonic() + self.process.timeout
             while not lines or lines[-1] != "uciok":
                 lines.append(self._line(deadline))
-                if len(lines) > 64:
+                if len(lines) > 256:
                     raise UciGateError("Oversized option handshake")
             expected = {
                 key: value.replace("{weights}", self.config.weights.resolve().as_posix())
                 for key, value in cast(dict[str, str], action["handshake"]).items()
             }
-            self.handshakes.append(validate_handshake(lines, expected))
+            self.handshakes.append(validate_handshake(lines, expected, self.config.backends))
         elif "expect" in action:
             self._expect(cast(str, action["expect"]))
         elif "error" in action:
@@ -1158,6 +1262,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--spec-dir", type=Path, default=Path("tests/data/uci/protocol-v1"))
     parser.add_argument("--timeout", type=float, default=10)
     parser.add_argument("--case-timeout", type=float, default=60)
+    parser.add_argument("--backends", choices=sorted(BACKEND_VARIANTS), default="gpu")
     args = parser.parse_args(argv)
     if not sys.flags.isolated:
         print("UCI gate requires python -I", file=sys.stderr)
@@ -1171,6 +1276,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 args.spec_dir,
                 args.timeout,
                 args.case_timeout,
+                args.backends,
             ),
             args.output,
         )

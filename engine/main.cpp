@@ -17,6 +17,7 @@
 #include "engine/nn/command_runner.h"
 #include "engine/nn/model_metadata.h"
 #include "engine/search/command_runner.h"
+#include "engine/selfplay/selfplay.h"
 #include "engine/uci/bench.h"
 #include "engine/uci/command_runner.h"
 #include "engine/util/build_info.h"
@@ -175,23 +176,47 @@ int run(std::span<char*> arguments) {
     if (arguments.size() == 1) return mouse::uci::run_uci_command({});
     if (arguments.size() >= 2 && std::string_view{arguments[1]} == "uci")
         return mouse::uci::run_uci_command(arguments.subspan(2));
+    if (arguments.size() >= 2 && std::string_view{arguments[1]} == "policyhead")
+        return mouse::uci::run_uci_command(arguments.subspan(2),
+                                           mouse::uci::SearchAlgorithm::PolicyHead);
+    if (arguments.size() >= 2 && std::string_view{arguments[1]} == "valuehead")
+        return mouse::uci::run_uci_command(arguments.subspan(2),
+                                           mouse::uci::SearchAlgorithm::ValueHead);
+    if (arguments.size() >= 2 && std::string_view{arguments[1]} == "dag-preview")
+        return mouse::uci::run_uci_command(arguments.subspan(2),
+                                           mouse::uci::SearchAlgorithm::DagPreview);
+    if (arguments.size() >= 2 && std::string_view{arguments[1]} == "selfplay")
+        return mouse::selfplay::run_selfplay_command(arguments.subspan(2));
+#if MOUSE_DIRECTML
+#define MOUSE_BACKEND_CHOICES "<cpu|directml>"
+#else
+#define MOUSE_BACKEND_CHOICES "<cpu|cuda|tensorrt>"
+#endif
     if (arguments.size() == 2 && std::string_view{arguments[1]} == "--help") {
         std::cout
             << "Usage: mouse [uci [explicit backend/search options]]\n"
+               "       mouse policyhead | valuehead  UCI, playing from the network with no search\n"
+               "       mouse dag-preview  UCI, with transpositions sharing one evaluation\n"
+               "       mouse selfplay --weights=<ONNX> --visits=<n> [--games=<n>] [--training]\n"
+               "         Lc0's selfplay flags; prefix one with player1. player2. white. or black.\n"
                "       mouse --version | --help\n"
                "       mouse describe-net <ONNX>\n"
-               "       mouse backend-eval --weights <ONNX> --backend <cpu|cuda|tensorrt>\n"
+               "       mouse backend-eval --weights <ONNX> --backend " MOUSE_BACKEND_CHOICES
+               "\n"
                "         --precision <fp32|fp16> --inputs <MOUSEIN1> [--buckets 1,8,32,64]\n"
-               "       mouse backendbench --weights <ONNX> --backend <cpu|cuda|tensorrt>\n"
+               "       mouse backendbench --weights <ONNX> --backend " MOUSE_BACKEND_CHOICES
+               "\n"
                "         --precision <fp32|fp16> [--start-batch-size 1] [--max-batch-size 1024]\n"
                "         [--batch-step 1] [--batches 100]\n"
                "         GPU options: --gpu-dll-dir <dir> (repeat), --cache-dir <dir>, --device 0\n"
-               "       mouse search --weights <ONNX> --backend <cpu|cuda|tensorrt>\n"
+               "       mouse search --weights <ONNX> --backend " MOUSE_BACKEND_CHOICES
+               "\n"
                "         --precision <fp32|fp16> [--nodes 800] [--movetime <ms>] [--depth "
                "<plies>]\n"
                "         [--fen \"<FEN>\"] [--moves \"e2e4 e7e5\"] [--chess960] [--deterministic]\n"
                "         [--threads 4] [--batch 64] [--ram-limit-mb 512] [--nncache-mb 0]\n"
-               "       mouse bench --weights <ONNX> --backend <cpu|cuda|tensorrt>\n"
+               "       mouse bench --weights <ONNX> --backend " MOUSE_BACKEND_CHOICES
+               "\n"
                "         --precision <fp32|fp16> [--nodes 800] [explicit search/backend options]\n"
                "       mouse perft [divide] <depth> [--fen \"<FEN>\"] [--chess960]\n"
                "  --version  Show build identity and verify the loaded ONNX Runtime.\n"
@@ -206,6 +231,11 @@ int run(std::span<char*> arguments) {
     }
     if (arguments.size() >= 2 && std::string_view{arguments[1]} == "backendbench") {
         return mouse::nn::run_backend_command(mouse::nn::BackendCommandKind::Benchmark,
+                                              arguments.subspan(2));
+    }
+    // Internal: the child process that builds missing TensorRT engines for a parent.
+    if (arguments.size() >= 2 && std::string_view{arguments[1]} == "build-tensorrt-cache") {
+        return mouse::nn::run_backend_command(mouse::nn::BackendCommandKind::BuildCache,
                                               arguments.subspan(2));
     }
     if (arguments.size() >= 2 && std::string_view{arguments[1]} == "bench") {

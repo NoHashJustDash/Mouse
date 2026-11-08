@@ -151,6 +151,11 @@ def test_strict_info_parser_preserves_volatile_and_deterministic_fields() -> Non
     assert parsed["time"] == 80
 
 
+def test_info_parser_reads_proven_mates() -> None:
+    assert gate().parse_info(INFO.replace("score cp 20", "score mate 3"))["score_mate"] == 3
+    assert gate().parse_info(INFO.replace("score cp 20", "score mate -2"))["score_mate"] == -2
+
+
 @pytest.mark.parametrize(
     "line",
     [
@@ -162,7 +167,9 @@ def test_strict_info_parser_preserves_volatile_and_deterministic_fields() -> Non
         INFO.replace("hashfull 1", "hashfull 1001"),
         INFO.replace("multipv 1", "multipv 0"),
         INFO.replace("510 200 290", "510 200 291"),
-        INFO.replace("score cp 20", "score mate 1"),
+        INFO.replace("score cp 20", "score mate 0"),
+        INFO.replace("score cp 20", "score mate x"),
+        INFO.replace("score cp 20", "score lowerbound 20"),
         INFO.replace("e7e5", "e7e9"),
         INFO.replace("seldepth 2 ", ""),
         INFO.replace("depth 2", "depth 3", 1),
@@ -394,6 +401,15 @@ HANDSHAKE = [
     "option name FpuStrategyAtRoot type combo default same var same var reduction var absolute",
     "option name FpuValueAtRoot type string default 1",
     "option name PolicyTemperature type string default 1.359",
+    "option name MovesLeftMaxEffect type string default 0.0345",
+    "option name MovesLeftThreshold type string default 0.8",
+    "option name MovesLeftSlope type string default 0.0027",
+    "option name MovesLeftConstantFactor type string default 0",
+    "option name MovesLeftScaledFactor type string default 1.6521",
+    "option name MovesLeftQuadraticFactor type string default -0.6521",
+    "option name WDLDrawRateTarget type string default 0",
+    "option name WDLDrawRateReference type string default 0.5",
+    "option name WDLMaxS type string default 1.4",
     "option name MultiPV type spin default 1 min 1 max 256",
     "option name UCI_ShowWDL type check default false",
     "option name UCI_Chess960 type check default false",
@@ -408,6 +424,60 @@ HANDSHAKE = [
     "option name CpuThreads type spin default 1 min 1 max 128",
     "option name WorkspaceMb type spin default 16 min 1 max 16384",
     "option name Deterministic type check default true",
+    "option name MaxCollisionEvents type spin default 917 min 1 max 65536",
+    "option name MaxCollisionVisits type spin default 80000 min 1 max 100000000",
+    "option name MaxCollisionVisitsScalingStart type spin default 28 min 1 max 100000",
+    "option name MaxCollisionVisitsScalingEnd type spin default 145000 min 0 max 100000000",
+    "option name MaxCollisionVisitsScalingPower type string default 1.25",
+    "option name OutOfOrderEval type check default true",
+    "option name MaxOutOfOrderEvalsFactor type string default 2.4",
+    "option name MaxPrefetch type spin default 32 min 0 max 1024",
+    "option name IdlingMinimumWork type spin default 0 min 0 max 10000",
+    "option name ThreadIdlingThreshold type spin default 1 min 0 max 128",
+    "option name MinimumProcessingWork type spin default 20 min 2 max 100000",
+    "option name MinimumPerTaskProcessing type spin default 8 min 1 max 100000",
+    "option name MinimumPickingWork type spin default 1 min 1 max 100000",
+    "option name MinimumRemainingPickingWork type spin default 20 min 0 max 100000",
+    "option name SolidTreeThreshold type spin default 100 min 1 max 2000000000",
+    "option name Temperature type string default 0",
+    "option name TempDecayMoves type spin default 0 min 0 max 640",
+    "option name TempDecayDelayMoves type spin default 0 min 0 max 100",
+    "option name TempCutoffMove type spin default 0 min 0 max 1000",
+    "option name TempEndgame type string default 0",
+    "option name TempValueCutoff type string default 100",
+    "option name TempVisitOffset type string default 0",
+    "option name DirichletNoiseEpsilon type string default 0",
+    "option name DirichletNoiseAlpha type string default 0.3",
+    "option name TaskWorkers type spin default -1 min -1 max 128",
+    "option name MaxConcurrentSearchers type spin default 1 min 0 max 128",
+    "option name SearchSpinBackoff type check default false",
+    "option name TwoFoldDraws type check default true",
+    "option name StickyEndgames type check default true",
+    "option name FpuStrategy type combo default reduction var reduction var absolute",
+    "option name HistoryFill type combo default fen_only var no var fen_only var always",
+    "option name DrawScore type string default 0",
+    "option name NodesPerSecondLimit type string default 0",
+    "option name Contempt type string default <empty>",
+    "option name ContemptMode type combo default play var play var white_side_analysis"
+    " var black_side_analysis var disable",
+    "option name ContemptMaxValue type string default 420",
+    "option name WDLContemptAttenuation type string default 1",
+    "option name WDLBookExitBias type string default 0.65",
+    "option name WDLCalibrationElo type string default 0",
+    "option name WDLEvalObjectivity type string default 1",
+    "option name UCI_Opponent type string default <empty>",
+    "option name UCI_RatingAdv type string default 0",
+    "option name ScoreType type combo default WDL_mu var centipawn var centipawn_with_drawscore"
+    " var centipawn_2019 var centipawn_2018 var win_percentage var Q var W-L var WDL_mu",
+    "option name PerPVCounters type check default false",
+    "option name UCI_ShowMovesLeft type check default false",
+    "option name VerboseMoveStats type check default false",
+    "option name LogFile type string default <empty>",
+    "option name ConfigFile type string default mouse.config",
+    "option name TimeManager type string default legacy",
+    "option name BackendOptions type string default <empty>",
+    "option name SyzygyPath type string default <empty>",
+    "option name SyzygyFastPlay type check default false",
     "uciok",
 ]
 
@@ -417,9 +487,24 @@ def test_handshake_requires_exact_option_contract_and_original_identity() -> Non
     assert parsed["Backend"]["default"] == "cpu"
     assert parsed["CacheHistoryLength"] == {"type": "spin", "default": "0"}
     assert parsed["LogSearchStats"] == {"type": "check", "default": "false"}
-    assert len(parsed) == 29
+    assert len(parsed) == 90
     assert parsed["FpuStrategyAtRoot"] == {"type": "combo", "default": "same"}
     assert parsed["FpuValueAtRoot"] == {"type": "string", "default": "1"}
+
+
+def test_directml_builds_declare_their_own_backend_variants() -> None:
+    api = gate()
+    directml = [
+        row.replace(
+            "default cpu var cpu var cuda var tensorrt", "default directml var cpu var directml"
+        )
+        for row in HANDSHAKE
+    ]
+    assert api.validate_handshake(directml, {}, "directml")["Backend"]["default"] == "directml"
+    with pytest.raises(api.UciGateError):
+        api.validate_handshake(directml, {})
+    with pytest.raises(api.UciGateError):
+        api.validate_handshake(HANDSHAKE, {}, "directml")
 
 
 @pytest.mark.parametrize(
@@ -724,7 +809,7 @@ def test_root_fpu_option_contract_refuses_wrong_strategy_and_nonfinite_defaults(
     before: str, after: str
 ) -> None:
     module = gate()
-    assert len(module.validate_handshake(HANDSHAKE, {})) == 29
+    assert len(module.validate_handshake(HANDSHAKE, {})) == 90
     lines = [line.replace(before, after) for line in HANDSHAKE]
     with pytest.raises(module.UciGateError):
         module.validate_handshake(lines, {})
@@ -732,7 +817,7 @@ def test_root_fpu_option_contract_refuses_wrong_strategy_and_nonfinite_defaults(
 
 def test_root_fpu_value_transactions_use_exact_decimal_semantics() -> None:
     module = gate()
-    assert len(module.validate_handshake(HANDSHAKE, {"FpuValueAtRoot": "1.0"})) == 29
+    assert len(module.validate_handshake(HANDSHAKE, {"FpuValueAtRoot": "1.0"})) == 90
     with pytest.raises(module.UciGateError, match="retain"):
         module.validate_handshake(HANDSHAKE, {"FpuValueAtRoot": "0.5"})
 

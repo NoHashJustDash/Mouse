@@ -3,13 +3,14 @@
 
 #include <algorithm>
 #include <exception>
+#include <limits>
 #include <new>
 #include <string>
 
 namespace mouse::search {
 Result<LeafStatus> classify_leaf(chess::Position& position, const chess::AttackTables& attacks,
                                  std::span<const std::uint64_t> search_ancestor_keys,
-                                 LeafContext context) {
+                                 LeafContext context, bool two_fold_draws, bool threefold_draws) {
     try {
         LeafStatus result;
         result.legal_moves = chess::legal_moves(position, attacks);
@@ -32,13 +33,18 @@ Result<LeafStatus> classify_leaf(chess::Position& position, const chess::AttackT
             result.reason = TerminalReason::FiftyMove;
         else if (position.insufficient_material())
             result.reason = TerminalReason::InsufficientMaterial;
-        else if (position.is_repetition(3))
+        else if (threefold_draws && position.is_repetition(3))
             result.reason = TerminalReason::Threefold;
-        else if (std::ranges::find(search_ancestor_keys, position.key()) !=
-                 search_ancestor_keys.end()) {
-            result.reason = TerminalReason::TreeRepetition;
-            result.contextual = true;
-        }
+        else if (two_fold_draws)
+            for (std::size_t i = search_ancestor_keys.size(); i > 0; --i) {
+                if (search_ancestor_keys[i - 1] != position.key()) continue;
+                const auto cycle = search_ancestor_keys.size() - (i - 1);
+                if (cycle > std::numeric_limits<std::uint16_t>::max())
+                    return tl::unexpected(std::string{"Search repetition cycle out of range"});
+                result.reason = TerminalReason::TreeRepetition;
+                result.repetition_cycle = static_cast<std::uint16_t>(cycle);
+                break;
+            }
         if (result.reason != TerminalReason::None) result.draw = 1.0F;
         return result;
     } catch (const std::bad_alloc&) {

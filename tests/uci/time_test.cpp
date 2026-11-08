@@ -316,6 +316,78 @@ TEST_CASE("Recent physical root paths bound batches without shortening the alloc
     CHECK(required_optional(saturated.deadline) <= Clock::time_point::max());
 }
 
+TEST_CASE("A measured bucket cost replaces the per-position batch forecast",
+          "[uci][time][bucket-cost]") {
+    using Clock = std::chrono::steady_clock;
+    using mouse::uci::BucketCost;
+    const auto start = Clock::time_point{std::chrono::seconds{100}};
+    constexpr std::array<std::size_t, 4> buckets{1, 8, 32, 96};
+    const mouse::uci::TimeBudget budget{.budget = Milliseconds{200}, .hold_until_signal = false};
+    // Regression: a 6 ms root path capped every 200 ms move at bucket 8, because the
+    // forecast charged each row a whole root path. Replaying match positions, that held
+    // Mouse's network to 26k nps with a reused tree where a fresh tree reached 59k.
+    const auto unmeasured =
+        mouse::uci::schedule_search(budget, start, start, Milliseconds{6}, buckets, 96);
+    CHECK(unmeasured.maximum_batch == 8);
+    const std::array measured{BucketCost{1, Milliseconds{1}}, BucketCost{8, Milliseconds{1}},
+                              BucketCost{32, Milliseconds{2}}, BucketCost{96, Milliseconds{3}}};
+    const auto fits =
+        mouse::uci::schedule_search(budget, start, start, Milliseconds{6}, buckets, 96, measured);
+    CHECK_FALSE(fits.exhausted);
+    CHECK(fits.maximum_batch == 96);
+    CHECK(fits.deadline == start + Milliseconds{200});
+    // Never above the search's own batch, whatever the evidence says.
+    CHECK(mouse::uci::schedule_search(budget, start, start, Milliseconds{6}, buckets, 32, measured)
+              .maximum_batch == 32);
+    // Too little time for two slots of the big bucket: fall back to the largest that fits.
+    const std::array slow{BucketCost{8, Milliseconds{1}}, BucketCost{32, Milliseconds{2}},
+                          BucketCost{96, Milliseconds{150}}};
+    CHECK(mouse::uci::schedule_search(budget, start, start, Milliseconds{6}, buckets, 96, slow)
+              .maximum_batch == 32);
+    // An unmeasured bucket scales linearly from the nearest smaller measured one.
+    const std::array small_only{BucketCost{8, Milliseconds{1}}};
+    CHECK(mouse::uci::schedule_search(budget, start, start, Milliseconds{6}, buckets, 96,
+                                      small_only)
+              .maximum_batch == 96);
+    const std::array slow_small{BucketCost{8, Milliseconds{10}}};
+    CHECK(mouse::uci::schedule_search(budget, start, start, Milliseconds{6}, buckets, 96,
+                                      slow_small)
+              .maximum_batch == 32);
+    // Measurements never revive a search that the root path says cannot fit.
+    const auto late = mouse::uci::schedule_search(budget, start, start + Milliseconds{190},
+                                                  Milliseconds{6}, buckets, 96, measured);
+    CHECK(late.exhausted);
+    CHECK(late.maximum_batch == 1);
+    // A saturated sample cannot overflow the arithmetic.
+    const std::array saturated{BucketCost{8, Clock::duration::max()}};
+    CHECK(mouse::uci::schedule_search(budget, start, start, Milliseconds{1}, buckets, 96, saturated)
+              .maximum_batch >= 1);
+}
+
+TEST_CASE("Bucket latencies keep recent cost per physical bucket", "[uci][time][bucket-cost]") {
+    using Clock = std::chrono::steady_clock;
+    mouse::uci::BucketLatencies latencies;
+    std::array<mouse::uci::BucketCost, mouse::uci::BucketLatencies::kCapacity> storage{};
+    CHECK(latencies.snapshot(storage).empty());
+    latencies.observe(96, Milliseconds{3});
+    latencies.observe(8, Milliseconds{1});
+    latencies.observe(96, Milliseconds{2});
+    latencies.observe(32, Clock::duration::zero());
+    const auto costs = latencies.snapshot(storage);
+    REQUIRE(costs.size() == 2);
+    CHECK(costs[0].bucket == 96);
+    CHECK(costs[0].cost == Milliseconds{3});
+    CHECK(costs[1].bucket == 8);
+    // Eight newer calls evict a spike.
+    for (int i = 0; i < 8; ++i) latencies.observe(96, Milliseconds{2});
+    CHECK(latencies.snapshot(storage)[0].cost == Milliseconds{2});
+    // Storage is fixed: extra buckets are ignored, not an error.
+    for (std::size_t i = 0; i < 40; ++i) latencies.observe(100 + i, Milliseconds{1});
+    CHECK(latencies.snapshot(storage).size() <= mouse::uci::BucketLatencies::kCapacity);
+    latencies.clear();
+    CHECK(latencies.snapshot(storage).empty());
+}
+
 TEST_CASE("Legacy first move matches the real lc0 allocation rather than a fixed horizon",
           "[uci][time][legacy-v1]") {
     GoCommand command;

@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
+#include <filesystem>
 #include <memory>
+#include <optional>
+#include <string>
 
 #include "engine/nn/backend.h"
 
@@ -53,8 +56,24 @@ class GpuTransfer {
 // Startup-only helpers: no global state, no current-device changes, no kernels.
 [[nodiscard]] GpuIdentity query_gpu_identity(const BackendConfig& config);
 [[nodiscard]] std::size_t query_gpu_multiprocessors(const BackendConfig& config);
+// DirectML (Windows, DirectML builds): device_id counts hardware adapters in DXGI's
+// high-performance order (IDXGIFactory6::EnumAdapterByGpuPreference), so 0 is the
+// discrete GPU even on laptops whose display runs on an integrated one. ORT's DirectML
+// provider takes the IDXGIFactory::EnumAdapters index instead, matched here by LUID.
+struct DirectMlAdapter {
+    GpuIdentity identity;
+    int enum_adapters_index = -1;
+};
+[[nodiscard]] DirectMlAdapter query_directml_adapter(const BackendConfig& config);
+// After ORT has created a DirectML session: the DirectML.dll it loaded must be the one
+// shipped beside the ONNX Runtime library, never an older copy from System32.
+void require_bundled_directml(const BackendConfig& config);
 [[nodiscard]] std::string backend_identity(const BackendConfig& config, const BackendInfo& info,
                                            const std::string& gpu_fingerprint);
+// The Mouse-MoE TensorRT plugin library (engine/nn/trt_moe) beside the ONNX Runtime
+// library, for TensorRT backends of builds that include it; nullopt otherwise. A build
+// with the plugin fails explicitly when the file is missing.
+[[nodiscard]] std::optional<std::filesystem::path> trt_moe_plugin(const BackendConfig& config);
 enum class CacheLockMode : std::uint8_t { Wait, Try };
 // An OS-held lock serializes cooperating processes. Provider cache paths remain
 // stable for the session lifetime. Only a successful complete warm-up publishes
@@ -70,6 +89,10 @@ class TensorRtCache {
     TensorRtCache& operator=(const TensorRtCache&) = delete;
     TensorRtCache(TensorRtCache&&) = delete;
     TensorRtCache& operator=(TensorRtCache&&) = delete;
+    // Whether the identity's namespace exists, without creating or locking it. A
+    // namespace that exists is still validated (and may be incomplete) when opened.
+    [[nodiscard]] static bool exists(const std::filesystem::path& root,
+                                     const std::string& identity);
     [[nodiscard]] const std::filesystem::path& directory() const noexcept;
     [[nodiscard]] bool reusable() const noexcept;
     void commit();

@@ -799,3 +799,27 @@ def test_source_allowlist_rejects_every_unrelated_project(
     change_zip(config, document, [("Mouse-source/" + relative, b"private local work")])
     with pytest.raises(api().PackageError, match="outside the Phase1 allowlist"):
         api().load_plan(config)
+
+
+def _stage(root: Path, names: set[str]) -> None:
+    for name in names:
+        path = root / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(name.encode())
+
+
+def test_plugin_builds_require_exactly_the_plugin_and_cutlass_license(tmp_path: Path) -> None:
+    m = api()
+    plain, plugin = tmp_path / "plain", tmp_path / "plugin"
+    _stage(plain, set(m.STAGE_FILES))
+    _stage(plugin, set(m.STAGE_FILES | m.PLUGIN_FILES))
+    assert m.stage_inventory(plain) == set(m.STAGE_FILES)
+    assert m.stage_inventory(plugin, True) == set(m.STAGE_FILES | m.PLUGIN_FILES)
+    # The CMake cache decides the mode; a stage never silently gains or loses the plugin.
+    with pytest.raises(m.PackageError):
+        m.stage_inventory(plugin)
+    with pytest.raises(m.PackageError):
+        m.stage_inventory(plain, True)
+    (plugin / "licenses" / "CUTLASS-LICENSE").unlink()
+    with pytest.raises(m.PackageError):
+        m.stage_inventory(plugin, True)

@@ -31,6 +31,22 @@
       "cacheVariables": { "MOUSE_USE_PEXT": "ON" }
     },
     {
+      "name": "windows-moe",
+      "inherits": "windows-release",
+      "cacheVariables": {
+        "MOUSE_TRT_MOE_PLUGIN": "ON",
+        "MOUSE_TENSORRT_ROOT": "${sourceDir}/.toolchain/sdks/tensorrt/TensorRT-10.9.0.34",
+        "MOUSE_CUTLASS_ROOT": "${sourceDir}/.toolchain/sdks/cutlass-3.9.2"
+      }
+    },
+    {
+      "name": "windows-dml",
+      "inherits": "windows-release",
+      "cacheVariables": {
+        "MOUSE_ORT_ROOT": "${sourceDir}/.toolchain/sdks/onnxruntime/onnxruntime-win-x64-directml-1.22.0"
+      }
+    },
+    {
       "name": "linux-base",
       "hidden": true,
       "inherits": "base",
@@ -73,6 +89,8 @@
     { "name": "windows-debug", "configurePreset": "windows-debug" },
     { "name": "windows-release", "configurePreset": "windows-release" },
     { "name": "windows-pext", "configurePreset": "windows-pext" },
+    { "name": "windows-moe", "configurePreset": "windows-moe" },
+    { "name": "windows-dml", "configurePreset": "windows-dml" },
     { "name": "linux-gcc-release", "configurePreset": "linux-gcc-release" },
     { "name": "linux-clang-release", "configurePreset": "linux-clang-release" },
     { "name": "linux-clang-asan", "configurePreset": "linux-clang-asan" },
@@ -83,6 +101,8 @@
     { "name": "windows-debug", "configurePreset": "windows-debug", "filter": { "include": { "label": "cpu" } }, "output": { "outputOnFailure": true } },
     { "name": "windows-release", "configurePreset": "windows-release", "filter": { "include": { "label": "cpu" } }, "output": { "outputOnFailure": true } },
     { "name": "windows-pext", "configurePreset": "windows-pext", "filter": { "include": { "label": "cpu" } }, "output": { "outputOnFailure": true } },
+    { "name": "windows-moe", "configurePreset": "windows-moe", "filter": { "include": { "label": "cpu" } }, "output": { "outputOnFailure": true } },
+    { "name": "windows-dml", "configurePreset": "windows-dml", "filter": { "include": { "label": "cpu|directml" } }, "output": { "outputOnFailure": true } },
     { "name": "linux-gcc-release", "configurePreset": "linux-gcc-release", "filter": { "include": { "label": "cpu" } }, "output": { "outputOnFailure": true } },
     { "name": "linux-clang-release", "configurePreset": "linux-clang-release", "filter": { "include": { "label": "cpu" } }, "output": { "outputOnFailure": true } },
     { "name": "linux-clang-asan", "configurePreset": "linux-clang-asan", "filter": { "include": { "label": "cpu" } }, "output": { "outputOnFailure": true } },

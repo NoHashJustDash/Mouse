@@ -5,6 +5,7 @@
 #include <array>
 #include <bit>
 #include <cerrno>
+#include <charconv>
 #include <cstdlib>
 #include <fstream>
 #include <iterator>
@@ -16,6 +17,10 @@
 #include <utility>
 #ifdef _WIN32
 #include <Windows.h>
+#if MOUSE_DIRECTML
+#include <dxgi1_6.h>
+#include <wrl/client.h>
+#endif
 #else
 #include <dlfcn.h>
 #include <fcntl.h>
@@ -198,6 +203,37 @@ class NvmlSession {
    private:
     decltype(&nvmlShutdown) shutdown_;
 };
+#endif
+#if MOUSE_DIRECTML
+std::string hex(unsigned long long value, int digits) {
+    std::array<char, 16> text{};
+    const auto converted = std::to_chars(text.data(), text.data() + text.size(), value, 16);
+    std::string result(text.data(), converted.ptr);
+    return std::string(
+               static_cast<std::size_t>(std::max(0, digits - static_cast<int>(result.size()))),
+               '0') +
+           result;
+}
+void dxgi_check(HRESULT result, std::string_view operation) {
+    if (FAILED(result))
+        throw std::runtime_error(std::string{operation} + " failed with HRESULT 0x" +
+                                 hex(static_cast<std::uint32_t>(result), 8));
+}
+std::string utf8_text(const wchar_t* text) {
+    const int bytes = WideCharToMultiByte(CP_UTF8, 0, text, -1, nullptr, 0, nullptr, nullptr);
+    if (bytes <= 0) throw std::runtime_error("Cannot convert a GPU adapter name to UTF-8");
+    std::string result(static_cast<std::size_t>(bytes), '\0');
+    if (WideCharToMultiByte(CP_UTF8, 0, text, -1, result.data(), bytes, nullptr, nullptr) != bytes)
+        throw std::runtime_error("Cannot convert a GPU adapter name to UTF-8");
+    result.pop_back();  // the terminating NUL
+    return result;
+}
+bool same_adapter(const LUID& left, const LUID& right) {
+    return left.LowPart == right.LowPart && left.HighPart == right.HighPart;
+}
+std::filesystem::path bundled_directml(const BackendConfig& config) {
+    return config.runtime_path.parent_path() / "DirectML.dll";
+}
 #endif
 class FileLock {
    public:
@@ -657,9 +693,115 @@ std::size_t query_gpu_multiprocessors(const BackendConfig& config) {
 #endif
 }
 
+DirectMlAdapter query_directml_adapter(const BackendConfig& config) {
+#if MOUSE_DIRECTML
+    using Microsoft::WRL::ComPtr;
+    ComPtr<IDXGIFactory6> factory;
+    dxgi_check(CreateDXGIFactory1(IID_PPV_ARGS(&factory)),
+               "Create a DXGI 1.6 factory (Windows 10 1803 or newer)");
+    std::vector<DXGI_ADAPTER_DESC1> hardware;
+    for (UINT index = 0;; ++index) {
+        ComPtr<IDXGIAdapter1> adapter;
+        const auto found = factory->EnumAdapterByGpuPreference(
+            index, DXGI_GPU_PREFERENCE_HIGH_PERFORMANCE, IID_PPV_ARGS(&adapter));
+        if (found == DXGI_ERROR_NOT_FOUND) break;
+        dxgi_check(found, "Enumerate GPU adapters");
+        DXGI_ADAPTER_DESC1 description{};
+        dxgi_check(adapter->GetDesc1(&description), "Read a GPU adapter description");
+        if ((description.Flags & DXGI_ADAPTER_FLAG_SOFTWARE) == 0) hardware.push_back(description);
+    }
+    if (hardware.empty()) throw std::runtime_error("DirectML found no hardware GPU adapter");
+    if (config.device_id < 0 || static_cast<std::size_t>(config.device_id) >= hardware.size()) {
+        std::string found;
+        for (std::size_t index = 0; index < hardware.size(); ++index)
+            found += (index ? ", " : "") + std::to_string(index) + ": " +
+                     utf8_text(hardware[index].Description);
+        throw std::runtime_error("DirectML GPU device " + std::to_string(config.device_id) +
+                                 " does not exist; adapters by performance: " + found);
+    }
+    const auto& chosen = hardware[static_cast<std::size_t>(config.device_id)];
+    DirectMlAdapter result;
+    LARGE_INTEGER driver{};
+    for (UINT index = 0;; ++index) {
+        ComPtr<IDXGIAdapter1> adapter;
+        const auto found = factory->EnumAdapters1(index, &adapter);
+        if (found == DXGI_ERROR_NOT_FOUND) break;
+        dxgi_check(found, "Enumerate GPU adapters");
+        DXGI_ADAPTER_DESC1 description{};
+        dxgi_check(adapter->GetDesc1(&description), "Read a GPU adapter description");
+        if (!same_adapter(description.AdapterLuid, chosen.AdapterLuid)) continue;
+        dxgi_check(adapter->CheckInterfaceSupport(__uuidof(IDXGIDevice), &driver),
+                   "Read the GPU driver version");
+        result.enum_adapters_index = static_cast<int>(index);
+        break;
+    }
+    if (result.enum_adapters_index < 0)
+        throw std::runtime_error("The selected GPU is missing from DXGI's adapter list");
+    const auto directml = bundled_directml(config);
+    if (!std::filesystem::is_regular_file(directml))
+        throw std::runtime_error("DirectML needs DirectML.dll beside the engine: " +
+                                 directml.string());
+    auto& info = result.identity.info;
+    info.device_name = utf8_text(chosen.Description);
+    info.device_uuid = "pci-" + hex(chosen.VendorId, 4) + '-' + hex(chosen.DeviceId, 4) + '-' +
+                       hex(chosen.SubSysId, 8) + '-' + hex(chosen.Revision, 2);
+    const auto high = static_cast<std::uint32_t>(driver.HighPart);
+    const auto low = static_cast<std::uint32_t>(driver.LowPart);
+    info.driver_version = std::to_string(high >> 16U) + '.' + std::to_string(high & 0xffffU) + '.' +
+                          std::to_string(low >> 16U) + '.' + std::to_string(low & 0xffffU);
+    result.identity.capability = "d3d12";
+    result.identity.runtime_fingerprint =
+        "adapter_order=high_performance\ndirectml=" + file_hash(directml);
+    return result;
+#else
+    static_cast<void>(config);
+    throw std::runtime_error(
+        "DirectML backend unavailable: this Mouse build has no DirectML runtime (CMake preset "
+        "windows-dml)");
+#endif
+}
+
+void require_bundled_directml(const BackendConfig& config) {
+#if MOUSE_DIRECTML
+    const HMODULE module = GetModuleHandleW(L"DirectML.dll");
+    if (module == nullptr)
+        throw std::runtime_error("ONNX Runtime created a DirectML session without DirectML.dll");
+    std::array<wchar_t, 32768> name{};
+    const auto count = GetModuleFileNameW(module, name.data(), static_cast<DWORD>(name.size()));
+    if (count == 0 || count >= name.size())
+        throw std::runtime_error("Cannot read the loaded DirectML.dll path");
+    const std::filesystem::path loaded{name.data()};
+    const auto expected = bundled_directml(config);
+    if (!std::filesystem::equivalent(loaded, expected))
+        throw std::runtime_error("ONNX Runtime loaded " + loaded.string() + " instead of " +
+                                 expected.string());
+#else
+    static_cast<void>(config);
+    throw std::runtime_error("DirectML backend unavailable in this build");
+#endif
+}
+
+std::optional<std::filesystem::path> trt_moe_plugin(const BackendConfig& config) {
+#if MOUSE_TRT_MOE_PLUGIN
+    if (config.kind != BackendKind::TensorRt) return std::nullopt;
+#ifdef _WIN32
+    auto path = config.runtime_path.parent_path() / "mouse_moe_trt.dll";
+#else
+    auto path = config.runtime_path.parent_path() / "libmouse_moe_trt.so";
+#endif
+    if (!std::filesystem::is_regular_file(path))
+        throw std::runtime_error("TensorRT needs the Mouse-MoE plugin library beside the engine: " +
+                                 path.string());
+    return path;
+#else
+    static_cast<void>(config);
+    return std::nullopt;
+#endif
+}
+
 std::string backend_identity(const BackendConfig& config, const BackendInfo& info,
                              const std::string& gpu_fingerprint) {
-    std::string identity = "provider_options_revision=4\n";
+    std::string identity = "provider_options_revision=5\n";
     const auto append = [&identity](std::string_view key, const std::string& value) {
         identity += std::string{key} + '=' + std::to_string(value.size()) + ':' + value + '\n';
     };
@@ -678,6 +820,8 @@ std::string backend_identity(const BackendConfig& config, const BackendInfo& inf
     append("cpu_threads", std::to_string(config.cpu_threads));
     append("deterministic_compute", config.deterministic_compute ? "1" : "0");
     append("device_id", std::to_string(config.device_id));
+    const auto plugin = trt_moe_plugin(config);
+    append("trt_moe_plugin", plugin ? file_hash(*plugin) : std::string{"none"});
     std::string buckets;
     for (const auto bucket : config.batch_buckets) buckets += std::to_string(bucket) + ',';
     append("buckets", buckets);
@@ -723,6 +867,9 @@ TensorRtCache::TensorRtCache(const std::filesystem::path& root, std::string iden
                              CacheLockMode mode)
     : impl_(std::make_unique<Impl>(root, std::move(identity), mode)) {}
 TensorRtCache::~TensorRtCache() = default;
+bool TensorRtCache::exists(const std::filesystem::path& root, const std::string& identity) {
+    return std::filesystem::exists(cache_root(root) / digest(identity).substr(0, 16));
+}
 const std::filesystem::path& TensorRtCache::directory() const noexcept { return impl_->path; }
 bool TensorRtCache::reusable() const noexcept { return !impl_->manifest.empty(); }
 void TensorRtCache::commit() {

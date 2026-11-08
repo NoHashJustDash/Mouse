@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "engine/nn/encoder.h"
 
+#include <algorithm>
+#include <bit>
 #include <cmath>
 #include <limits>
 #include <string>
@@ -125,12 +127,18 @@ Result<void> expand_planes(const InputPlanes& planes, std::span<float> output) {
         if (!std::isfinite(plane.value))
             return tl::unexpected<std::string>("Neural plane contains a non-finite value");
     }
+    // Whole-plane fills, then only the occupied squares: most planes are empty, full
+    // (constant aux planes) or sparse (pieces), and this runs while the GPU waits.
     for (std::size_t plane = 0; plane < planes.size(); ++plane) {
-        for (unsigned square = 0; square < 64; ++square) {
-            output[plane * 64 + square] =
-                (planes.at(plane).mask & (std::uint64_t{1} << square)) != 0 ? planes.at(plane).value
-                                                                            : 0.0F;
+        const auto mask = planes[plane].mask;
+        const auto value = planes[plane].value;
+        float* const out = output.data() + plane * 64;
+        if (mask == ~std::uint64_t{0}) {
+            std::fill_n(out, 64, value);
+            continue;
         }
+        std::fill_n(out, 64, 0.0F);
+        for (auto rest = mask; rest != 0; rest &= rest - 1) out[std::countr_zero(rest)] = value;
     }
     return {};
 }

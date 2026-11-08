@@ -189,6 +189,25 @@ bool Position::is_repetition(int occurrences) const {
     }
     return false;
 }
+Position::Repetitions Position::repetitions() const {
+    Repetitions result;
+    const auto available = std::min<std::uint64_t>(state_.halfmove, history_.size() - 1);
+    const auto last = history_.size() - 1;
+    for (std::size_t back = 2; back <= available; back += 2) {
+        if (history_.at(last - back) != key()) continue;
+        if (result.count == 0) result.plies_since_previous = static_cast<std::uint32_t>(back);
+        ++result.count;
+    }
+    return result;
+}
+bool Position::repeated_since_zeroing() const {
+    const auto available = std::min<std::uint64_t>(state_.halfmove, history_.size() - 1);
+    const auto start = history_.size() - 1 - static_cast<std::size_t>(available);
+    for (std::size_t later = start + 1; later < history_.size(); ++later)
+        for (std::size_t earlier = start; earlier < later; ++earlier)
+            if (history_.at(earlier) == history_.at(later)) return true;
+    return false;
+}
 bool Position::insufficient_material() const {
     const auto both = [this](PieceType type) {
         return pieces(Color::White, type) | pieces(Color::Black, type);

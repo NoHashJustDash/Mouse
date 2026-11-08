@@ -1,12 +1,15 @@
 # Mouse
 
-Mouse is a UCI chess engine that plays with Lc0's neural network
-**T1-256x10-distilled-swa-2432500**. It is written from scratch in C++20 and runs
-the network through ONNX Runtime on an NVIDIA GPU (TensorRT or CUDA) or on the CPU.
+Mouse is a UCI chess engine with its own neural network, **M1.5**. It is written
+in C++20 and runs its network through ONNX Runtime and TensorRT on an NVIDIA GPU.
+It can also play Lc0-format networks such as T1-256x10-distilled-swa-2432500, on
+TensorRT, CUDA or the CPU.
 
-Version 1.0.0 aims to play the T1 network the way lc0 does: the same Monte Carlo
-tree search with lc0's default parameters, smart pruning and legacy time manager,
-implemented independently and checked against lc0 itself.
+The search is the same kind of Monte Carlo tree search as lc0's, with its smart
+pruning and legacy time manager, implemented independently and checked against lc0
+itself. Five of its default values are Mouse's own, tuned for M1.5; see
+[docs/LC0_DEFAULTS.md](docs/LC0_DEFAULTS.md). The network, what it was trained on and
+its licence are described in [docs/NETWORK.md](docs/NETWORK.md).
 
 Mouse was built with the help of AI coding assistants; see
 [Made with AI assistance](#made-with-ai-assistance) and [Credits](#credits).
@@ -14,43 +17,30 @@ Mouse was built with the help of AI coding assistants; see
 ## Strength
 
 All results are from one machine (GeForce RTX 5070, Ryzen 7 7800X3D), playing one game
-at a time with pondering off and Mouse at its default settings.
+at a time with pondering off and Mouse at its default settings. Margins are 95%
+confidence intervals.
 
-**Against a rated reference engine.** Motor 0.9.0 is rated 3694 ± 9 on the
-[CCRL Blitz list](https://computerchess.org.uk/404/) (single CPU). Motor ran single
-threaded with 128 MB hash. The openings were the balanced `8moves_v3` book, each
-played once with each colour. Games were adjudicated as drawn after move 40 once
-both engines scored within ±10 cp for 8 moves, and as won once both agreed on at
-least 1000 cp for 4 moves.
+Every match below is 600 games at 10+0.1, with UHO openings played once with each
+colour.
 
-| Time control | Games | Mouse vs Motor | Elo difference | Rating estimate |
-|---|---|---|---|---|
-| 10+0.1 | 100 | +20 −4 =76 | +56 ± 27 | 3750 ± 28 |
-| 60+0.6 | 60 | +6 −3 =51 | +17 ± 34 | 3711 ± 35 |
-| 180+2 | 22 of 40 planned | +3 −0 =19 | +48 ± 47 | 3742 ± 48 |
+**Against Mouse 1.0.0.** Mouse 1.1.0 playing M1.5 against the released Mouse 1.0.0
+playing Lc0's T1 network, each at its default settings: **+0.6 ± 14.4 Elo**
+(+148 −147 =305). The two releases are equally strong; 1.1.0 gets there with its own
+network.
 
-The rating estimate is Motor's CCRL rating plus the measured difference. It is our
-own estimate, not a CCRL rating: CCRL plays on different hardware, scales its time
-control to it, and rates against many opponents. Use it as a reference point.
+**Against lc0.** Each release played lc0 v0.32.1 running T1 at lc0's default settings.
 
-Margins are 95% confidence intervals. At 60+0.6 the margin includes zero and at
-180+2 it only just excludes it, so the longer games show Mouse at least at
-Motor's level but not by how much. The 180+2 match was stopped after 22 of 40
-planned games to make the release; Mouse had not lost a game.
+| Release | Mouse vs lc0 | Games (+ − =) |
+|---|---|---|
+| 1.0.0, T1 | −59.6 ± 12.3 Elo | +70 −172 =358 |
+| 1.1.0, M1.5 | −38.4 ± 15.1 Elo | +121 −187 =292 |
 
-**Against lc0 with the same network.** lc0 v0.32.1 running T1, 600 games at
-10+0.1, UHO openings played once with each colour, both at default settings:
+1.1.0 scored better against lc0 than 1.0.0 did, but the direct match above found no
+difference between the two releases, so this is not a measured gain in strength. Mouse
+is still weaker than lc0.
 
-| Match | Result |
-|---|---|
-| Mouse vs lc0 | **−59.6 ± 12.3 Elo** (+70 −172 =358) |
-| Search speed | 0.89x lc0's nodes per second (geometric mean of five positions) |
-
-Mouse is weaker than lc0 with the same network. The main known cause: when the
-search tree contains a repeated position, Mouse discards the whole tree before its
-next move instead of keeping it as lc0 does. In self-play that happened before
-about 40% of searches. Mouse also does not yet skip root moves that can no longer
-become best before time runs out. Both are being fixed for the next release.
+**Search speed.** On the same T1 network, Mouse 1.1.0 searched 1.35 times as many nodes
+per second as lc0 (geometric mean of five positions); 1.0.0 managed 0.89 times.
 
 ## Made with AI assistance
 
@@ -62,24 +52,42 @@ reviewed by another.
 
 Nothing was taken on an assistant's word. The move generator is checked against
 reference perft counts, the network input encoding and policy map are checked
-position by position against lc0, and each release is played against lc0 and a
-rated engine before it ships (results above). Mouse is still a young engine, so
+position by position against lc0, and each release is played against lc0 before it
+ships (results above). Mouse is still a young engine, so
 please report anything that looks wrong.
+
+## Licence
+
+Mouse is free software under the GNU General Public License, version 3 or later
+([LICENSE](LICENSE)), with an additional permission to combine it with NVIDIA's CUDA,
+cuDNN and TensorRT libraries ([docs/NVIDIA_PERMISSION.md](docs/NVIDIA_PERMISSION.md)).
+The M1.5 network is under the same licence; its training-data notice is in
+[docs/NETWORK.md](docs/NETWORK.md). Vendored and bundled components keep their own
+licences, listed below and in `licenses/`.
 
 ## Credits
 
-- [Lc0 (Leela Chess Zero)](https://lczero.org/): the T1 network Mouse plays with,
-  and the design Mouse follows: the network weights format, input encoding and
-  policy map, and the search (PUCT selection, default parameters, moves-left
-  utility, smart pruning and time manager). Mouse's code is its own
-  implementation; where it follows lc0, the comments cite the lc0 source file
-  (v0.32.1 or commit `fd71a2d`). The reference fixtures under `tests/data/nn/` were produced with
-  lc0, and lc0 v0.32.1 is the engine Mouse is measured against. Lc0 is licensed
-  under the GPL-3.0, like Mouse. Mouse is not affiliated with or endorsed by the
-  Lc0 project.
+- [Lc0 (Leela Chess Zero)](https://lczero.org/): the design Mouse follows: the
+  network weights format, input encoding and policy map, and the search (PUCT
+  selection, default parameters, moves-left utility, smart pruning and time manager).
+  Mouse's code is its own implementation, apart from the vendored file below; where it
+  follows lc0, the comments cite the lc0 source file (v0.32.1 or commit `fd71a2d`). The
+  reference fixtures under `tests/data/nn/` were produced with lc0, and lc0 v0.32.1 is
+  the engine Mouse is measured against. Lc0 is licensed under the GPL-3.0, like Mouse.
+  Mouse is not affiliated with or endorsed by the Lc0 project.
+- The Lc0 project's networks and training data. M1.5 was trained on Lc0's open
+  training data and distilled from Lc0's BT4 network
+  (BT4-1024x15x32h-swa-6147500-policytune-332), which provided its training targets.
+  Mouse can also play Lc0's T1 network. The data notice and the details are in
+  [docs/NETWORK.md](docs/NETWORK.md).
+- Syzygy tablebase probing: `third_party/lc0_syzygy` is vendored from Lc0 (GPL-3.0 or
+  later), which took it from Ronald de Man's work by way of Cfish, a C port of
+  Stockfish. See [third_party/README.md](third_party/README.md).
 - [AlphaZero](https://www.science.org/doi/10.1126/science.aar6404) by DeepMind:
   the approach behind both lc0 and Mouse, a Monte Carlo tree search guided by a
   neural network.
+- [CUTLASS](https://github.com/NVIDIA/cutlass) 3.9.2 by NVIDIA (BSD-3-Clause), compiled
+  into the `mouse_moe_trt` plugin; its licence ships in `licenses/`.
 - [ONNX Runtime](https://github.com/microsoft/onnxruntime) by Microsoft (MIT
   licence), bundled with the release.
 - [tl::expected](https://github.com/TartanLlama/expected) by Sy Brand (CC0),
@@ -93,9 +101,8 @@ please report anything that looks wrong.
   node counts in the move-generator tests. Some test positions come from
   Stockfish's perft tests and the
   [Chessprogramming wiki](https://www.chessprogramming.org/Perft_Results).
-  Mouse contains no Stockfish code.
-- [Motor](https://github.com/martinnovaak/motor) by Martin Novák, the rated
-  reference engine for the strength estimate.
+  Apart from the ancestry of the vendored Syzygy file above, Mouse contains no
+  Stockfish code.
 - [fastchess](https://github.com/Disservin/fastchess) by Disservin, used to run
   the matches, with Stefan Pohl's UHO openings and the `8moves_v3` book from
   [official-stockfish/books](https://github.com/official-stockfish/books).
@@ -104,24 +111,32 @@ please report anything that looks wrong.
 
 1. Install the NVIDIA driver, CUDA 12.8, cuDNN 9.8 and TensorRT 10.9
    (versions and links in [docs/TOOLCHAIN.md](docs/TOOLCHAIN.md)).
-2. Unzip `mouse-1.0.0-windows-x64.zip`.
-3. Download and convert the T1 network (needs Python 3.12). From the unzipped folder:
+2. Unzip `mouse-1.1.0-windows-x64.zip`.
+3. Add `mouse.exe` to your chess GUI as a UCI engine. Set `WeightsFile` to the full path
+   of `M1.5.onnx` from the unzipped folder and `GpuDllDirectories` to your CUDA
+   `bin`, cuDNN `bin` and TensorRT `lib` folders, separated by semicolons.
 
-   ```powershell
-   py -3.12 -m venv .venv
-   .venv/Scripts/python -I -m pip install --only-binary=:all: --require-hashes -r tools/requirements-converter-windows-cpu.lock
-   .venv/Scripts/python -I -m pip install --no-build-isolation --no-deps ./tools
-   .venv/Scripts/python -I -m mouse_tools.setup_net --directory nets
-   ```
+The first start builds TensorRT engines for your GPU, which takes a few minutes;
+later starts take a few seconds. The build runs in a short-lived second `mouse.exe`
+process (`build-tensorrt-cache`) that needs several GB of free RAM while it works.
+The NVIDIA libraries are not included in the download.
 
-   The download checks the file's size and SHA-256 before converting it.
-4. Add `mouse.exe` to your chess GUI as a UCI engine. Set `WeightsFile` to the
-   converted `.onnx` file and `GpuDllDirectories` to your CUDA `bin`, cuDNN `bin`
-   and TensorRT `lib` folders, separated by semicolons.
+M1.5 needs TensorRT and the `mouse_moe_trt.dll` plugin beside `mouse.exe`. It does
+not run on the CPU or CUDA backends: Mouse stops with an error instead of switching.
 
-The first start builds a TensorRT engine for your GPU, which takes about two
-minutes; later starts take a few seconds. The network and NVIDIA libraries are not
-included in the download.
+To play the T1 network instead, on any backend, download and convert it (needs
+Python 3.12). From the unzipped folder:
+
+```powershell
+py -3.12 -m venv .venv
+.venv/Scripts/python -I -m pip install --only-binary=:all: --require-hashes -r tools/requirements-converter-windows-cpu.lock
+.venv/Scripts/python -I -m pip install --no-build-isolation --no-deps ./tools
+.venv/Scripts/python -I -m mouse_tools.setup_net --directory nets
+```
+
+The download checks the file's size and SHA-256 before converting it. Mouse's default
+search values were tuned for M1.5, so T1 may play better with
+[lc0's values](docs/LC0_DEFAULTS.md).
 
 ## Windows build
 
@@ -209,7 +224,12 @@ Use the actual SDK directories from your installation. All three explicit GPU
 directories and the ONNX model must be valid. The engine reports errors instead
 of selecting another model, precision or provider. TensorRT builds its disk cache
 on first load; allow up to five minutes for initial readiness in a GUI or runner.
-It reports cold-build progress as `info string` messages. On the RTX 5070 with
+It reports cold-build progress as `info string` messages. Engines are built by a
+child `mouse.exe build-tensorrt-cache` process, which exits when the cache is
+committed; the engine then loads it. Changing a backend option such as `WeightsFile`
+or `MinibatchSize` builds a new cache if needed; the engines it replaces stay in GPU
+memory until the engine exits, because ORT 1.22's TensorRT provider cannot release a
+session safely. On the RTX 5070 with
 ORT 1.22.0, TensorRT 10.9 and T1 FP16, a fresh cache took 119.39 seconds; the
 verified warm EPContext cache reached `readyok` in 4.19 seconds. These measured
 times depend on hardware and system load. Cache identity changes require a new
@@ -252,6 +272,18 @@ takes semicolon-separated absolute SDK directories. Paths containing spaces are
 ordinary UCI string values and do not need embedded quotes. MultiPV and WDL
 output are configurable; Chess960 uses standard UCI_Chess960 king-to-rook moves.
 
+Other modes take Lc0's names and flags. `mouse dag-preview` is UCI with a search in
+which transpositions share one evaluation. `mouse selfplay` plays games for testing or
+training data, with options set per player or colour (`--player1.visits=800`,
+`--black.resign-percentage=5`):
+
+```powershell
+.\build\windows-release\mouse.exe selfplay --weights=nets/t1.onnx --visits=800 --games=100 --parallelism=4 --training
+```
+
+Training files are Lc0's V6 records under CacheDirectory, or `--training-directory`.
+RamLimitMb is shared by all the games a selfplay run holds at once.
+
 The standalone benchmark runs the fixed original 16-position corpus, starting
 a fresh tree and NN result cache for each case:
 
@@ -287,13 +319,22 @@ Generated from Mouse (Zulfeqar Malik) via `uci` (build version omitted).
 | NNCacheSize | spin | 2000000 | 0 … 16000000 |
 | CacheHistoryLength | spin | 0 | 0 … 7 |
 | RamLimitMb | spin | 512 | 1 … 16384 |
-| CPuct | string | 1.745 | — |
+| CPuct | string | 1.26 | — |
 | CPuctBase | string | 38739 | — |
 | CPuctFactor | string | 3.894 | — |
-| FpuValue | string | 0.33 | — |
+| FpuValue | string | 0.323 | — |
 | FpuStrategyAtRoot | combo | same | same; reduction; absolute |
 | FpuValueAtRoot | string | 1 | — |
-| PolicyTemperature | string | 1.359 | — |
+| PolicyTemperature | string | 1.352 | — |
+| MovesLeftMaxEffect | string | 0.0345 | — |
+| MovesLeftThreshold | string | 0.8 | — |
+| MovesLeftSlope | string | 0.0027 | — |
+| MovesLeftConstantFactor | string | 0 | — |
+| MovesLeftScaledFactor | string | 1.6521 | — |
+| MovesLeftQuadraticFactor | string | -0.6521 | — |
+| WDLDrawRateTarget | string | 0.779 | — |
+| WDLDrawRateReference | string | 0.75 | — |
+| WDLMaxS | string | 1.4 | — |
 | MultiPV | spin | 1 | 1 … 256 |
 | LogSearchStats | check | false | — |
 | UCI\_ShowWDL | check | false | — |
@@ -308,6 +349,58 @@ Generated from Mouse (Zulfeqar Malik) via `uci` (build version omitted).
 | CpuThreads | spin | 1 | 1 … 128 |
 | WorkspaceMb | spin | 1024 | 1 … 16384 |
 | Deterministic | check | false | — |
+| MaxCollisionEvents | spin | 917 | 1 … 65536 |
+| MaxCollisionVisits | spin | 80000 | 1 … 100000000 |
+| MaxCollisionVisitsScalingStart | spin | 28 | 1 … 100000 |
+| MaxCollisionVisitsScalingEnd | spin | 145000 | 0 … 100000000 |
+| MaxCollisionVisitsScalingPower | string | 1.25 | — |
+| OutOfOrderEval | check | true | — |
+| MaxOutOfOrderEvalsFactor | string | 2.4 | — |
+| MaxPrefetch | spin | 32 | 0 … 1024 |
+| IdlingMinimumWork | spin | 0 | 0 … 10000 |
+| ThreadIdlingThreshold | spin | 1 | 0 … 128 |
+| MinimumProcessingWork | spin | 20 | 2 … 100000 |
+| MinimumPerTaskProcessing | spin | 8 | 1 … 100000 |
+| MinimumPickingWork | spin | 1 | 1 … 100000 |
+| MinimumRemainingPickingWork | spin | 20 | 0 … 100000 |
+| SolidTreeThreshold | spin | 100 | 1 … 2000000000 |
+| Temperature | string | 0 | — |
+| TempDecayMoves | spin | 0 | 0 … 640 |
+| TempDecayDelayMoves | spin | 0 | 0 … 100 |
+| TempCutoffMove | spin | 0 | 0 … 1000 |
+| TempEndgame | string | 0 | — |
+| TempValueCutoff | string | 100 | — |
+| TempVisitOffset | string | 0 | — |
+| DirichletNoiseEpsilon | string | 0 | — |
+| DirichletNoiseAlpha | string | 0.3 | — |
+| TaskWorkers | spin | -1 | -1 … 128 |
+| MaxConcurrentSearchers | spin | 1 | 0 … 128 |
+| SearchSpinBackoff | check | false | — |
+| TwoFoldDraws | check | true | — |
+| StickyEndgames | check | true | — |
+| FpuStrategy | combo | reduction | reduction; absolute |
+| HistoryFill | combo | fen\_only | no; fen\_only; always |
+| DrawScore | string | 0 | — |
+| NodesPerSecondLimit | string | 0 | — |
+| Contempt | string | &lt;empty&gt; | — |
+| ContemptMode | combo | play | play; white\_side\_analysis; black\_side\_analysis; disable |
+| ContemptMaxValue | string | 420 | — |
+| WDLContemptAttenuation | string | 1 | — |
+| WDLBookExitBias | string | 0.65 | — |
+| WDLCalibrationElo | string | 0 | — |
+| WDLEvalObjectivity | string | 1 | — |
+| UCI\_Opponent | string | &lt;empty&gt; | — |
+| UCI\_RatingAdv | string | 0 | — |
+| ScoreType | combo | WDL\_mu | centipawn; centipawn\_with\_drawscore; centipawn\_2019; centipawn\_2018; win\_percentage; Q; W-L; WDL\_mu |
+| PerPVCounters | check | false | — |
+| UCI\_ShowMovesLeft | check | false | — |
+| VerboseMoveStats | check | false | — |
+| LogFile | string | &lt;empty&gt; | — |
+| ConfigFile | string | mouse.config | — |
+| TimeManager | string | legacy | — |
+| BackendOptions | string | &lt;empty&gt; | — |
+| SyzygyPath | string | &lt;empty&gt; | — |
+| SyzygyFastPlay | check | false | — |
 <!-- END MOUSE UCI OPTIONS -->
 
 `NNCacheSize` counts entries, with a default capacity of 2,000,000. Entries

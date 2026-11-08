@@ -2,8 +2,8 @@
 
 `perft.epd` contains **126 distinct positions and 392 required depth checks**.
 The complete local and CI gate runs every stored `Dn` value; a shallow run does
-not satisfy this suite. No depth from the six positions in
-[`docs/PHASE1_SPEC.md`](../../docs/PHASE1_SPEC.md) was shortened or omitted.
+not satisfy this suite. No depth from the six standard perft positions was shortened or
+omitted.
 
 Each noncomment line contains six FEN fields followed by:
 

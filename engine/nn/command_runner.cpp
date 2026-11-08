@@ -205,11 +205,13 @@ Result<void> resolve_backend_cli_paths(BackendConfig& config) {
     const auto executable = RuntimeLibrary::executable_path();
     if (!executable) return tl::unexpected(executable.error());
     config.runtime_path = executable->parent_path() / build::runtime_filename;
+    config.tensorrt_builder = *executable;
     return {};
 }
 
 int run_backend_command(BackendCommandKind kind, std::span<char*> arguments) {
-    if (kind != BackendCommandKind::Evaluate && kind != BackendCommandKind::Benchmark) {
+    if (kind != BackendCommandKind::Evaluate && kind != BackendCommandKind::Benchmark &&
+        kind != BackendCommandKind::BuildCache) {
         std::cerr << "Mouse error: Configuration parsing profile is not an executable command.\n";
         return 2;
     }
@@ -225,6 +227,21 @@ int run_backend_command(BackendCommandKind kind, std::span<char*> arguments) {
     if (!paths) {
         std::cerr << "Mouse error: " << paths.error() << '\n';
         return 1;
+    }
+    if (kind == BackendCommandKind::BuildCache) {
+        // The helper of detail::build_tensorrt_cache: compile and commit every bucket here,
+        // reporting progress lines on stdout for the parent to relay.
+        command->backend.tensorrt_builder.clear();
+        command->backend.initialization_progress = [](std::string_view text) {
+            std::cout << text << std::endl;
+        };
+        const auto built = create_backend(command->backend);
+        if (!built) {
+            std::cerr << "Mouse error: " << built.error() << '\n';
+            return 1;
+        }
+        std::cout << "TensorRT cache ready" << std::endl;
+        return 0;
     }
     const auto result = kind == BackendCommandKind::Evaluate ? evaluate_command(*command)
                                                              : benchmark_command(*command);

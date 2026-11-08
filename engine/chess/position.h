@@ -3,6 +3,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <span>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -54,6 +55,18 @@ class Position {
     [[nodiscard]] std::uint64_t recompute_key(const AttackTables& attacks) const;
     [[nodiscard]] bool in_check(const AttackTables& attacks) const;
     [[nodiscard]] bool is_repetition(int occurrences = 3) const;
+    // Whether any position since the last zeroing move occurred twice
+    // (lc0 PositionHistory::DidRepeatSinceLastZeroingMove).
+    [[nodiscard]] bool repeated_since_zeroing() const;
+    // Lc0 Position::GetRepetitions and GetPliesSincePrevRepetition: earlier occurrences of this
+    // position since the last irreversible move, and the plies back to the latest of them.
+    struct Repetitions {
+        std::uint32_t count = 0;
+        std::uint32_t plies_since_previous = 0;
+    };
+    [[nodiscard]] Repetitions repetitions() const;
+    // Position keys so far, this position last.
+    [[nodiscard]] std::span<const std::uint64_t> key_history() const noexcept { return history_; }
     [[nodiscard]] bool is_rule50_draw() const noexcept { return state_.halfmove >= 100; }
     [[nodiscard]] bool insufficient_material() const;
     // Preallocate additional plies before worker replay. State is unchanged on failure.

@@ -22,7 +22,9 @@ struct LeafStatus {
     TerminalReason reason = TerminalReason::None;
     float q = 0.0F;
     float draw = 0.0F;
-    bool contextual = false;
+    // TreeRepetition only: plies since the most recent earlier occurrence of
+    // this position in the current tree path (lc0 GetPliesSincePrevRepetition).
+    std::uint16_t repetition_cycle = 0;
 };
 // The caller exclusively owns position during legal generation. Ancestor keys
 // contain only ancestors from the current search root, excluding this leaf;
@@ -30,9 +32,12 @@ struct LeafStatus {
 // Checkmate/stalemate precede rule draws. A root with legal moves must return a
 // move even when a GUI has not adjudicated a draw: rule draws apply only below
 // the root. Context is explicit; an empty ancestor span alone does not imply root.
+// Lc0 dag_classic handles repetitions per path, so it asks for neither repetition draw.
 // Q uses the leaf side-to-move viewpoint.
 [[nodiscard]] Result<LeafStatus> classify_leaf(chess::Position& position,
                                                const chess::AttackTables& attacks,
                                                std::span<const std::uint64_t> search_ancestor_keys,
-                                               LeafContext context = LeafContext::NonRoot);
+                                               LeafContext context = LeafContext::NonRoot,
+                                               bool two_fold_draws = true,
+                                               bool threefold_draws = true);
 }  // namespace mouse::search

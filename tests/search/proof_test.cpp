@@ -142,7 +142,7 @@ TEST_CASE("Proof upper bounds tighten when newly established alternatives improv
     CHECK(*combine(refined_loss) == proof(Loss, 4));
 }
 
-TEST_CASE("Tree compaction preserves proven expanded nodes and discards contextual heuristics",
+TEST_CASE("Tree compaction preserves proven expanded nodes and keeps tree-twofold terminals",
           "[search][proof][tree]") {
     auto created = mouse::search::Tree::create(64U << 10U);
     REQUIRE(created);
@@ -172,22 +172,22 @@ TEST_CASE("Tree compaction preserves proven expanded nodes and discards contextu
     tree.node(3).proof = proof(Win, 1);
     tree.node(4).proof = proof(Loss);
     tree.node(4).state = mouse::search::NodeState::Terminal;
-    bool contextual = false;
+    bool twofold = false;
     SECTION("Quiescent complete-history subtree keeps proof") {}
-    SECTION("A reachable heuristic twofold invalidates retained context") {
-        contextual = true;
+    SECTION("A reachable tree-twofold terminal no longer discards the subtree") {
+        // Regression: the twofold flag discarded every reused tree that contained a
+        // tree repetition (~40% of 1.0.0 self-play searches started empty). Lc0
+        // fd71a2d classic/search.cc keeps the tree and reverts a stale twofold lazily.
+        twofold = true;
         tree.node(5).state = mouse::search::NodeState::Terminal;
-        tree.node(5).contextual_draw = true;
+        tree.node(5).twofold = true;
+        tree.node(5).leaf_moves_left = 4.0F;
         tree.node(5).leaf_draw = 1;
     }
     const auto reused = tree.re_root(1);
     REQUIRE(reused);
-    CHECK(reused->discarded_context == contextual);
-    if (contextual) {
-        CHECK(tree.node(0).proof == proof(Unknown));
-        CHECK(tree.node(0).visits == 0);
-        CHECK(tree.stats().node_count == 1);
-    } else {
+    CHECK(reused->kept_nodes == 4);
+    {
         CHECK(tree.node(0).proof == proof(Loss, 2));
         CHECK(tree.node(0).state == mouse::search::NodeState::Expanded);
         CHECK(tree.node(0).visits == 7);
@@ -198,10 +198,91 @@ TEST_CASE("Tree compaction preserves proven expanded nodes and discards contextu
         CHECK(tree.node(3).proof == proof(Unknown));
         CHECK(tree.stats().node_count == 4);
         CHECK(tree.stats().edge_count == 3);
+        CHECK(tree.node(3).state == (twofold ? mouse::search::NodeState::Terminal
+                                             : mouse::search::NodeState::Unexpanded));
+        CHECK(tree.node(3).twofold == twofold);
         REQUIRE(tree.reset());
         CHECK(tree.node(0).proof == proof(Unknown));
     }
     CHECK(tree.stats().charged_bytes <= tree.stats().budget_bytes);
+}
+TEST_CASE("Reverting a stale tree-twofold removes exactly its visits from every ancestor",
+          "[search][proof][tree]") {
+    // Lc0 fd71a2d classic/search.cc EnsureNodeTwoFoldCorrectForDepth and
+    // classic/node.cc RevertTerminalVisits: each ancestor loses the terminal's
+    // visits, draws and moves-left samples (cycle + distance per sample).
+    auto created = mouse::search::Tree::create(64U << 10U);
+    REQUIRE(created);
+    auto& tree = **created;
+    REQUIRE(tree.allocate_node());
+    REQUIRE(tree.allocate_node());
+    const std::array seed{
+        mouse::search::EdgeSeed{.move = {mouse::chess::square(0, 1), mouse::chess::square(0, 2)}}};
+    REQUIRE(tree.expand(0, seed));
+    REQUIRE(tree.expand(1, seed));
+    tree.edges(0)[0].child = 1;
+    tree.edges(1)[0].child = 2;
+    auto& root = tree.node(0);
+    root.state = mouse::search::NodeState::Expanded;
+    root.visits = 20;
+    root.value_sum = -1.5;
+    root.draw_sum = 9;
+    root.moves_left_sum = 300;
+    root.moves_left_samples = 20;
+    auto& middle = tree.node(1);
+    middle.state = mouse::search::NodeState::Expanded;
+    middle.visits = 10;
+    middle.value_sum = 2.5;
+    middle.draw_sum = 6;
+    middle.moves_left_sum = 100;
+    middle.moves_left_samples = 10;
+    auto& leaf = tree.node(2);
+    leaf.state = mouse::search::NodeState::Terminal;
+    leaf.twofold = true;
+    leaf.visits = 3;
+    leaf.draw_sum = 3;
+    leaf.moves_left_sum = 12;
+    leaf.moves_left_samples = 3;
+    leaf.leaf_draw = 1;
+    leaf.leaf_moves_left = 4.0F;
+    const std::array<mouse::search::NodeId, 2> ancestors{0, 1};
+    SECTION("Ordinary ancestors") {
+        const auto reverted = tree.revert_twofold(ancestors, 2);
+        REQUIRE(reverted);
+        CHECK(*reverted == 3);
+        CHECK(middle.visits == 7);
+        CHECK(middle.value_sum == 2.5);
+        CHECK(middle.draw_sum == 3);
+        CHECK(middle.moves_left_sum == 100 - 3 * 5);
+        CHECK(middle.moves_left_samples == 7);
+        CHECK(root.visits == 17);
+        CHECK(root.value_sum == -1.5);
+        CHECK(root.draw_sum == 6);
+        CHECK(root.moves_left_sum == 300 - 3 * 6);
+        CHECK(root.moves_left_samples == 17);
+    }
+    SECTION("A proven ancestor keeps its exact value at the reduced visit count") {
+        root.proof = proof(Win, 3);
+        root.value_sum = 20;
+        root.draw_sum = 0;
+        REQUIRE(tree.revert_twofold(ancestors, 2));
+        CHECK(root.visits == 17);
+        CHECK(root.value_sum == 17);
+        CHECK(root.draw_sum == 0);
+    }
+    SECTION("A terminal with visits in flight is left for a later pick") {
+        leaf.in_flight = 1;
+        CHECK_FALSE(tree.revert_twofold(ancestors, 2));
+        CHECK(root.visits == 20);
+        CHECK(leaf.state == mouse::search::NodeState::Terminal);
+        return;
+    }
+    CHECK(leaf.state == mouse::search::NodeState::Unexpanded);
+    CHECK(leaf.visits == 0);
+    CHECK(leaf.draw_sum == 0);
+    CHECK(leaf.moves_left_samples == 0);
+    CHECK_FALSE(leaf.twofold);
+    CHECK_FALSE(leaf.leaf_moves_left.has_value());
 }
 TEST_CASE("Soft proof utility prefers established bounds without excluding refinement",
           "[search][proof][proof-utility]") {

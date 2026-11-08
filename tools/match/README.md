@@ -30,8 +30,7 @@ so establish VRAM headroom before execution.
 | `parity-sprt` | Predeclared even `max_games` | Explicit `nodes` only | Balanced | Normalized SPRT -10,0 |
 | `tm-sprt` | Predeclared even `max_games` | 10+0.1 | UHO | Normalized SPRT -5,0 |
 
-`package-smoke` supplies the 10-game clean-machine/unzip/net check required by
-[Engineering Standards §6](../../docs/ENGINEERING_STANDARDS.md#6-releases).
+`package-smoke` supplies a 10-game clean-machine/unzip/net check for a release.
 It requires two identical Mouse executable/model/option configurations, explicit
 GPU `cuda|tensorrt` with `fp16`, `Threads=4`, `MinibatchSize=64`, and `NNCacheSize=0`.
 Its five color pairs use the full strict capture/PGN/book/clock audit and accept
