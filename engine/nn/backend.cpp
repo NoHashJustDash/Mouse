@@ -698,6 +698,34 @@ class OrtBackend final : public Backend {
     std::mutex mutex_;
 };
 }  // namespace
+std::vector<std::size_t> batch_buckets_for(std::size_t batch) {
+    constexpr std::size_t kSmall = 8;
+    constexpr std::size_t kMaximumSteps = 6;
+    std::vector<std::size_t> buckets;
+    if (batch > 1) buckets.push_back(1);
+    if (batch > kSmall) {
+        buckets.push_back(kSmall);
+        // The fewest steps whose 1.5 ratio reaches the batch (8 * 3^steps >= batch * 2^steps),
+        // but never more than six: from a batch of 92 the ratio passes 1.5.
+        std::size_t steps = 1, reach = kSmall * 3, scale = 2;
+        while (steps < kMaximumSteps && reach < batch * scale) {
+            ++steps;
+            reach *= 3;
+            scale *= 2;
+        }
+        const double ratio = std::pow(static_cast<double>(batch) / static_cast<double>(kSmall),
+                                      1.0 / static_cast<double>(steps));
+        for (std::size_t step = 1; step < steps; ++step) {
+            // The margin keeps an exact product (8 * 2 = 16) from rounding up past itself.
+            const double ideal =
+                static_cast<double>(kSmall) * std::pow(ratio, static_cast<double>(step));
+            const auto bucket = static_cast<std::size_t>(std::ceil(ideal - 1e-9));
+            if (bucket > buckets.back() && bucket < batch) buckets.push_back(bucket);
+        }
+    }
+    buckets.push_back(batch);
+    return buckets;
+}
 Result<std::size_t> recommended_minibatch(const BackendConfig& config) {
     if (config.kind == BackendKind::Cpu) return std::size_t{64};
     if (config.kind == BackendKind::DirectMl) return kDirectMlMinibatch;

@@ -12,6 +12,8 @@ namespace mouse::nn {
 // illegal logits) are validated before extracting legal values or caching them.
 // Hits submitted here complete with their batch. Search may consume cached
 // values directly before submitting its remaining misses to this evaluator.
+// Without a cache the backend reads the caller's input rows in place, so callers
+// must not change them until evaluate returns.
 struct EvaluationTiming {
     std::size_t positions = 0;
     std::chrono::nanoseconds provider{};

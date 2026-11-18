@@ -1,21 +1,28 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // SolidTreeThreshold, parallel picking, Dirichlet noise, temperature, dag-preview and TimeManager
 // smooth: lc0 features added after the first feature-parity pass.
+#include <algorithm>
 #include <atomic>
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 #include <chrono>
+#include <cmath>
+#include <functional>
+#include <limits>
 #include <map>
 #include <memory>
 #include <optional>
 #include <set>
 #include <string>
+#include <utility>
+#include <vector>
 
 #include "engine/chess/attacks.h"
 #include "engine/chess/movegen.h"
 #include "engine/nn/encoder.h"
 #include "engine/nn/history.h"
 #include "engine/nn/legal_cache.h"
+#include "engine/nn/policy_map.h"
 #include "engine/search/search.h"
 #include "engine/search/tree.h"
 #include "engine/uci/time.h"
@@ -275,6 +282,114 @@ TEST_CASE("Parallel picking finds what picking alone finds", "[parallel-pick]") 
     CHECK(shared / total > 0.99);
 }
 
+// A gather packs the rows that wait for the network over the rows a cache hit already backed up.
+// A row's policy indices have to move with its input, or the network's logits land on another
+// position's moves. Siblings often share one index array (the same side answers with the same
+// moves), so the test reads only children whose array no other root child has.
+TEST_CASE("A row that moves down in the batch keeps its own policy indices", "[gather]") {
+    constexpr std::string_view fen =
+        "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1";
+    SearchConfig config;
+    config.threads = 1;
+    config.maximum_batch = 8;
+    mouse::chess::AttackTables attacks;
+    auto root = *mouse::chess::Position::from_fen(fen, attacks);
+    mouse::nn::EncodingHistory history;
+    history.reset(root);
+    HashBackend oracle;
+    const auto logits_of = [&](const mouse::nn::InputPlanes& input) {
+        std::vector<mouse::nn::NNOutput> output(1);
+        REQUIRE(oracle.evaluate({&input, 1}, output));
+        return output.front().policy_logits;
+    };
+    struct Child {
+        Move move;
+        mouse::nn::InputPlanes input{};
+        mouse::nn::PolicyIndices policy;
+        std::vector<Move> replies;
+        float root_logit = 0;
+    };
+    const auto root_input = mouse::nn::encode_classical(history.frames(), 1);
+    REQUIRE(root_input.has_value());
+    const auto root_logits = logits_of(*root_input);
+    std::vector<Child> children;
+    for (const auto move : mouse::chess::legal_moves(root, attacks)) {
+        Child child{.move = move};
+        auto position = root;
+        static_cast<void>(position.make_move(move, attacks));
+        auto frames = history;
+        REQUIRE(frames.append(position));
+        const auto input = mouse::nn::encode_classical(frames.frames(), 1);
+        REQUIRE(input.has_value());
+        child.input = *input;
+        for (const auto reply : mouse::chess::legal_moves(position, attacks)) {
+            const auto index = mouse::nn::PolicyMap::index(reply, position.side_to_move());
+            REQUIRE(index.has_value());
+            child.policy.values.at(child.policy.size++) = *index;
+            child.replies.push_back(reply);
+        }
+        const auto index = mouse::nn::PolicyMap::index(move, root.side_to_move());
+        REQUIRE(index.has_value());
+        child.root_logit = root_logits.at(*index);
+        children.push_back(std::move(child));
+    }
+    // The search picks the likeliest moves first. Along that order every second child with an
+    // array of its own waits for the network; the cache answers all the others, the first included.
+    std::ranges::sort(children, std::greater{}, &Child::root_logit);
+    const auto same_indices = [](const Child& a, const Child& b) {
+        return a.policy.size == b.policy.size &&
+               std::equal(a.policy.values.begin(),
+                          a.policy.values.begin() + static_cast<std::ptrdiff_t>(a.policy.size),
+                          b.policy.values.begin());
+    };
+    std::vector<std::size_t> cached, read;
+    bool take = false;
+    for (std::size_t i = 0; i < children.size(); ++i) {
+        bool alone = true;
+        for (std::size_t other = 0; other < children.size(); ++other)
+            alone = alone && (other == i || !same_indices(children[i], children[other]));
+        (alone && std::exchange(take, !take) ? read : cached).push_back(i);
+    }
+    REQUIRE(read.size() >= 4);
+    std::size_t compared = 0;
+    for (const auto target : read) {
+        const auto& child = children[target];
+        Fixture fixture(config, fen);
+        for (const auto index : cached) {
+            mouse::nn::LegalOutput output;
+            output.wdl = {0.5F, 0.25F, 0.25F};
+            output.moves_left = 20.0F;
+            REQUIRE(fixture.cache->insert(children[index].input, children[index].policy, output));
+        }
+        fixture.run(400);
+        if (visits_of(*fixture.engine).at(mouse::chess::move_to_uci(child.move)) == 0) continue;
+        REQUIRE(fixture.engine->advance(child.move).has_value());
+        const auto edges = fixture.engine->all_root_moves();
+        REQUIRE(edges.size == child.replies.size());
+        // The prior of a reply is the softmax of the network's logit at that reply's own index.
+        const auto logits = logits_of(child.input);
+        auto highest = -std::numeric_limits<double>::infinity();
+        for (std::size_t i = 0; i < child.policy.size; ++i)
+            highest = std::max(highest, double{logits.at(child.policy.values.at(i))});
+        std::vector<double> weights;
+        double sum = 0;
+        for (std::size_t i = 0; i < child.policy.size; ++i) {
+            weights.push_back(std::exp((logits.at(child.policy.values.at(i)) - highest) /
+                                       config.selection.policy_temperature));
+            sum += weights.back();
+        }
+        for (std::size_t i = 0; i < child.replies.size(); ++i) {
+            const auto moves = std::span{edges.moves}.first(edges.size);
+            const auto edge = std::ranges::find(moves, child.replies[i], &RootMoveStat::move);
+            REQUIRE(edge != moves.end());
+            // Priors are stored in 16 bits, which is exact to about one part in 2000.
+            CHECK(edge->prior == Catch::Approx(weights[i] / sum).margin(1e-3));
+        }
+        ++compared;
+    }
+    CHECK(compared >= 4);
+}
+
 TEST_CASE("Picking options outside lc0's ranges are refused", "[parallel-pick]") {
     SearchConfig config;
     config.gather.minimum_picking_work = 0;
@@ -321,8 +436,7 @@ TEST_CASE("Dirichlet noise changes root priors and nothing below", "[noise]") {
     for (const auto prior : noised) sum += prior;
     CHECK(sum == Catch::Approx(1.0F).margin(0.01F));
     // Mixing keeps at least 1 - epsilon of each prior.
-    for (std::size_t i = 0; i < clean.size(); ++i)
-        CHECK(noised[i] >= clean[i] * 0.75F - 0.001F);
+    for (std::size_t i = 0; i < clean.size(); ++i) CHECK(noised[i] >= clean[i] * 0.75F - 0.001F);
 }
 
 TEST_CASE("Temperature samples root moves by visits", "[temperature]") {
@@ -340,7 +454,9 @@ TEST_CASE("Temperature samples root moves by visits", "[temperature]") {
         Fixture fixture(config);
         fixture.run(800);
         std::set<std::string> seen;
-        for (int i = 0; i < 300; ++i) seen.insert(mouse::chess::move_to_uci(required_optional(fixture.engine->final_move(1))));
+        for (int i = 0; i < 300; ++i)
+            seen.insert(
+                mouse::chess::move_to_uci(required_optional(fixture.engine->final_move(1))));
         CHECK(seen.size() > 3);
     }
     SECTION("a cutoff move hands over to the endgame temperature") {
@@ -351,7 +467,9 @@ TEST_CASE("Temperature samples root moves by visits", "[temperature]") {
         // Ply 8 is move 4 + 1 = 5.
         for (int i = 0; i < 50; ++i) CHECK(fixture.engine->final_move(8) == result.best_move);
         std::set<std::string> seen;
-        for (int i = 0; i < 300; ++i) seen.insert(mouse::chess::move_to_uci(required_optional(fixture.engine->final_move(2))));
+        for (int i = 0; i < 300; ++i)
+            seen.insert(
+                mouse::chess::move_to_uci(required_optional(fixture.engine->final_move(2))));
         CHECK(seen.size() > 1);
     }
     SECTION("decay reaches zero after its moves") {
@@ -621,7 +739,8 @@ TEST_CASE("Smooth carries its state between moves only when a move ran", "[smoot
     GoCommand go;
     go.wtime = 60000;
     go.btime = 60000;
-    TimeContext context{.side_to_move = mouse::chess::Color::White, .overhead_ms = 100, .game_ply = 1};
+    TimeContext context{
+        .side_to_move = mouse::chess::Color::White, .overhead_ms = 100, .game_ply = 1};
     auto first = manager.allocate(go, context);
     REQUIRE(first.has_value());
     REQUIRE(first->smooth);
@@ -633,11 +752,12 @@ TEST_CASE("Smooth carries its state between moves only when a move ran", "[smoot
     CHECK(second->budget == first->budget);
     second->smooth->begin(0);
     const std::array<std::uint64_t, 1> visits{5000};
-    static_cast<void>(second->smooth->decide(
-        {.new_nodes = 100, .total_nodes = 100, .root_visits = visits}, std::chrono::milliseconds{1}));
-    static_cast<void>(second->smooth->decide(
-        {.new_nodes = 90000, .total_nodes = 90000, .root_visits = visits},
-        std::chrono::milliseconds{1000}));
+    static_cast<void>(
+        second->smooth->decide({.new_nodes = 100, .total_nodes = 100, .root_visits = visits},
+                               std::chrono::milliseconds{1}));
+    static_cast<void>(
+        second->smooth->decide({.new_nodes = 90000, .total_nodes = 90000, .root_visits = visits},
+                               std::chrono::milliseconds{1000}));
     manager.complete(*second, std::chrono::milliseconds{1000}, 90000);
     auto third = manager.allocate(go, context);
     REQUIRE(third.has_value());
@@ -659,7 +779,8 @@ TEST_CASE("A running search takes the time stopper's word", "[smooth]") {
     limits.smart_pruning = false;
     limits.time_stopper = [&](const TimeSample& sample) {
         ++calls;
-        return TimeDecision{.stop = sample.new_nodes >= 500};
+        return TimeDecision{
+            .stop = sample.new_nodes >= 500, .remaining = std::nullopt, .nps = std::nullopt};
     };
     const auto result = fixture.engine->run(limits);
     REQUIRE(result.has_value());

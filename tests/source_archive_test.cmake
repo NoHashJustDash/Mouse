@@ -53,7 +53,7 @@ function(verify_unknown_cli_contract state)
   message(STATUS "Explicit unknown ${state}: configured CLI CTest passed; strict contract rejected sentinel")
 endfunction()
 set(configure "${CMAKE_COMMAND}" -S "${source}" -B "${binary}" -G Ninja
-  "-DCMAKE_BUILD_TYPE=Release" "-DBUILD_TESTING=OFF"
+  "-DCMAKE_BUILD_TYPE=Release" "-DBUILD_TESTING=OFF" "-DMOUSE_ENABLE_IPO=OFF"
   "-DCMAKE_CXX_COMPILER=${MOUSE_CXX_COMPILER}"
   "-DCMAKE_MAKE_PROGRAM=${MOUSE_MAKE_PROGRAM}"
   "-DCMAKE_TOOLCHAIN_FILE=${MOUSE_TOOLCHAIN_FILE}"

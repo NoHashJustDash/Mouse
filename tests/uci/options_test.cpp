@@ -4,10 +4,14 @@
 #include <algorithm>
 #include <array>
 #include <catch2/catch_test_macros.hpp>
+#include <cmath>
+#include <cstddef>
 #include <cstdlib>
+#include <functional>
 #include <optional>
 #include <stdexcept>
 #include <string_view>
+#include <vector>
 
 namespace {
 mouse::Result<mouse::uci::OptionUpdate> apply(const mouse::uci::Options& old, std::string name,
@@ -76,7 +80,7 @@ TEST_CASE("UCI configuration updates are atomic and identify owner rebuilds", "[
     const auto batch = apply(original, "MinibatchSize", "17");
     REQUIRE(batch);
     CHECK(batch->impact == mouse::uci::Reconfigure::Backend);
-    CHECK(batch->options.backend.batch_buckets == std::vector<std::size_t>{1, 8, 17});
+    CHECK(batch->options.backend.batch_buckets == std::vector<std::size_t>{1, 8, 12, 17});
     const auto cache = apply(original, "NNCacheSize", "2");
     REQUIRE(cache);
     CHECK(cache->options.nncache_entries == 2);
@@ -408,7 +412,8 @@ TEST_CASE("MinibatchSize 0 selects the backend-recommended batch like lc0",
     REQUIRE(fixed);
     CHECK_FALSE(fixed->options.auto_minibatch);
     CHECK(fixed->options.search.maximum_batch == 96);
-    CHECK(fixed->options.backend.batch_buckets == std::vector<std::size_t>{1, 8, 32, 96});
+    CHECK(fixed->options.backend.batch_buckets ==
+          std::vector<std::size_t>{1, 8, 13, 19, 28, 42, 64, 96});
     CHECK(fixed->impact == mouse::uci::Reconfigure::Backend);
     const auto automatic = apply(fixed->options, "MinibatchSize", "0");
     REQUIRE(automatic);
@@ -418,4 +423,34 @@ TEST_CASE("MinibatchSize 0 selects the backend-recommended batch like lc0",
     REQUIRE(unchanged);
     CHECK(unchanged->impact == mouse::uci::Reconfigure::None);
     CHECK(mouse::uci::minibatch_buckets(4) == std::vector<std::size_t>{1, 4});
+}
+
+TEST_CASE("Minibatch buckets bound padding waste with at most eight buckets",
+          "[uci][options][minibatch-buckets]") {
+    // Regression: {1, 8, 32, max} padded a batch of 9 rows to 32 (3.6x) and, at the RTX 5070's
+    // automatic 96, a batch of 33 rows to 96 (2.9x), and every padded row runs the whole net.
+    for (std::size_t maximum = 1; maximum <= 1024; ++maximum) {
+        INFO("maximum batch " << maximum);
+        const auto buckets = mouse::uci::minibatch_buckets(maximum);
+        REQUIRE_FALSE(buckets.empty());
+        CHECK(buckets.front() == 1);
+        CHECK(buckets.back() == maximum);
+        CHECK(buckets.size() <= 8);
+        CHECK(std::ranges::adjacent_find(buckets, std::ranges::greater_equal{}) == buckets.end());
+        // At most 1.5x up to a maximum of 96. Above it, six geometric steps from 8 reach the
+        // maximum and bound the padding by their ratio.
+        const double bound =
+            maximum <= 96 ? 1.5 : std::pow(static_cast<double>(maximum) / 8.0, 1.0 / 6.0);
+        double worst = 0;
+        for (std::size_t rows = 8; rows <= maximum; ++rows) {
+            const auto padded = *std::ranges::lower_bound(buckets, rows);
+            worst = std::max(worst, static_cast<double>(padded) / static_cast<double>(rows));
+        }
+        CHECK(worst <= bound + 1e-9);
+    }
+    CHECK(mouse::uci::minibatch_buckets(1) == std::vector<std::size_t>{1});
+    CHECK(mouse::uci::minibatch_buckets(8) == std::vector<std::size_t>{1, 8});
+    CHECK(mouse::uci::minibatch_buckets(9) == std::vector<std::size_t>{1, 8, 9});
+    CHECK(mouse::uci::minibatch_buckets(96) ==
+          std::vector<std::size_t>{1, 8, 13, 19, 28, 42, 64, 96});
 }

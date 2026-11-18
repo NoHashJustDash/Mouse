@@ -6,6 +6,58 @@ and Semantic Versioning.
 
 ## [Unreleased]
 
+## [2.0.0] - 2026-11-18
+
+Mouse now ships with the M2.1 network and a faster engine. With M2.1, Mouse 2.0.0 beat
+lc0 v0.32.1 running T1 by +33.1 ± 13.8 Elo in an SPRT (632 games at 10+0.1 on one
+machine). That result measures the engine and the network together.
+
+### Changed
+
+- The network is now M2.1, which replaces M1.5. It has M1.5's shape (19.9M parameters,
+  8.4M used per square) and was trained longer, on BT4 labels for all of its Lc0 data.
+  M2.0, its first 750k steps, beat M1.5 by +27.2 ± 12.4 Elo, and M2.1 beat M2.0 by
+  +31.9 ± 13.4 Elo.
+- The release ZIP ships the network as `M2.1.onnx`.
+- Legal moves are found from the checking and pinned pieces, where every candidate move
+  was made and unmade. The moves and their order are unchanged; `perft` is 5.5 times as
+  fast.
+- Release builds use link-time optimisation (`MOUSE_ENABLE_IPO`).
+- The GPU backends are built for up to eight batch sizes (1, 8, up to five geometric steps
+  and the maximum), where there were up to four, so a batch is padded less. The first
+  start builds about twice as many TensorRT engines: 438 seconds on an RTX 5070, against
+  218 in 1.1.0. Engine caches from 1.1.0 are rebuilt once.
+- At the default `CacheHistoryLength` of 0, the evaluation cache key leaves out the
+  50-move counter, as lc0's does. The same position at another count is now a cache hit,
+  so a search with the cache is no longer bit-identical to one without it.
+- Proven positions are handled as lc0's sticky endgames are: a proven position below the
+  root takes visits with its exact value and no network evaluation, a move into a
+  position the opponent has won gets prior 0, and a newly proven position corrects what
+  its ancestors already received from it. Mate distances below a proven position are no
+  longer refined, so a reported mate can be longer than the shortest one.
+- Each network row's legal moves are mapped to policy indices once, not twice, and
+  expansion seeds are checked for duplicates in linear time.
+- With M2.1, the engine searches 22% more positions in the same time than 1.1.0's.
+
+### Fixed
+
+- A move whose time allowed no further search was held until its deadline. It is now
+  played at once, and the unused time stays on the clock.
+
+### Added
+
+- The network's architecture and training code are published separately as
+  [Mouse-MoE](https://github.com/NoHashJustDash/Mouse-MoE).
+- `setup-gpu.ps1`, in the release ZIP: downloads the CUDA, cuDNN and TensorRT libraries
+  Mouse needs from NVIDIA's servers into a `gpu` folder beside `mouse.exe` and checks their
+  SHA-256 hashes. No NVIDIA account or installer is needed.
+- Mouse uses the `gpu` folder beside `mouse.exe` when `GpuDllDirectories` is empty.
+- `mouse doctor`: reports the NVIDIA driver, the library folder, any missing library and
+  the GPU, and says what to do about each problem.
+- The packager can make a DirectML release ZIP for AMD, Intel and other DirectX 12 GPUs,
+  with M2.1 as plugin-free FP32 and FP16 exports ([docs/DIRECTML.md](docs/DIRECTML.md)).
+  2.0.0 has no DirectML download; one is planned for 2.0.1.
+
 ## [1.1.0] - 2026-11-07
 
 Mouse now ships with its own network, M1.5.

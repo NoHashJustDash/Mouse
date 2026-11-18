@@ -17,7 +17,8 @@ TEST_CASE("Legacy pruning divides visit forecasts and waits200ms after first eva
                          .remaining_nodes = 100000,
                          .elapsed = Milliseconds{0},
                          .remaining_time = Milliseconds{200},
-                         .root_visits = visits};
+                         .root_visits = visits,
+                         .nps = std::nullopt};
     CHECK_FALSE(pruning.should_stop(sample));
     sample.elapsed = Milliseconds{199};
     CHECK_FALSE(pruning.should_stop(sample));
@@ -38,7 +39,8 @@ TEST_CASE("Pruning disable and minimum batches retain the source early-stop orde
                          .remaining_nodes = 1,
                          .elapsed = Milliseconds{0},
                          .remaining_time = Milliseconds{0},
-                         .root_visits = visits};
+                         .root_visits = visits,
+                         .nps = std::nullopt};
     SmartPruning disabled{0};
     CHECK_FALSE(disabled.should_stop(sample));
     SmartPruning limited{1.33F, 10};
@@ -70,7 +72,8 @@ TEST_CASE("Collision forecasts precede the minimum-batch stop check and saturate
                          .remaining_nodes = 100,
                          .elapsed = Milliseconds{0},
                          .remaining_time = Milliseconds{1000},
-                         .root_visits = visits};
+                         .root_visits = visits,
+                         .nps = std::nullopt};
     CHECK(pruning.estimated_remaining_playouts() == maximum);
     CHECK_FALSE(pruning.should_stop(sample));
     sample.elapsed = Milliseconds{199};

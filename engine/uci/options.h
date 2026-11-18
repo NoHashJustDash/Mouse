@@ -70,7 +70,9 @@ struct OptionUpdate {
 [[nodiscard]] Result<OptionUpdate> apply_option(const Options&, const SetOptionCommand&);
 [[nodiscard]] Result<Options> startup_options(std::span<const std::string_view> arguments);
 [[nodiscard]] std::vector<std::string> option_lines(const Options&);
-// TensorRT/CUDA batch buckets used for a minibatch: 1, 8 and 32 below it, then it.
+// TensorRT/CUDA batch buckets used for a minibatch: 1, 8, at most five geometric steps between 8
+// and the minibatch, then the minibatch; at most eight, and padding a batch of 8 or more rows
+// costs at most 1.5x up to a minibatch of 96 (see options.cpp for larger ones).
 [[nodiscard]] std::vector<std::size_t> minibatch_buckets(std::size_t batch);
 // Lc0 utils/configfile.cc format: one parameter per line, "--name=value" or "name=value", blank
 // lines and "#" comments ignored. A name is an option name or Lc0's long flag for it, ignoring

@@ -28,6 +28,12 @@ function(mouse_target_options target)
       BUILD_RPATH "$ORIGIN" INSTALL_RPATH "$ORIGIN")
   endif()
 
+  # Checked in CMakeLists.txt. Tests use the same setting, so they exercise the code the
+  # release binary is built from. For MSVC, CMake adds /GL, /LTCG and /INCREMENTAL:NO.
+  if(MOUSE_ENABLE_IPO)
+    set_target_properties(${target} PROPERTIES INTERPROCEDURAL_OPTIMIZATION ON)
+  endif()
+
   if(MOUSE_SANITIZER)
     if(MSVC)
       message(FATAL_ERROR "Sanitizer presets require Clang on Linux")

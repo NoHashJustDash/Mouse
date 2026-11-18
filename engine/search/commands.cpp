@@ -186,12 +186,7 @@ Result<SearchCommand> parse_search_command(std::span<const std::string_view> arg
     if (!parsed) return tl::unexpected(parsed.error());
     command.neural = std::move(*parsed);
     if (!explicit_buckets) {
-        auto& buckets = command.neural.backend.batch_buckets;
-        buckets.clear();
-        for (const std::size_t bucket : {std::size_t{1}, std::size_t{8}, std::size_t{32}}) {
-            if (bucket < command.config.maximum_batch) buckets.push_back(bucket);
-        }
-        buckets.push_back(command.config.maximum_batch);
+        command.neural.backend.batch_buckets = nn::batch_buckets_for(command.config.maximum_batch);
     }
     if (command.neural.backend.batch_buckets.back() < command.config.maximum_batch) {
         return tl::unexpected(std::string{"--buckets must cover --batch"});

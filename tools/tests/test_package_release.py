@@ -231,3 +231,122 @@ def test_release_ignores_generated_directories_in_source_roots(
     directory.mkdir()
     (directory / "generated.txt").write_text("generated local metadata", encoding="utf-8")
     assert package._release_inventory(source) == expected
+
+
+def directml_release_fixture(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Path, Path]:
+    """The release fixture, re-staged as a DirectML build's install."""
+    from test_package import pe
+
+    source, build = release_fixture(tmp_path, monkeypatch)
+    cache = build / "CMakeCache.txt"
+    cache.write_text(
+        cache.read_text(encoding="utf-8") + "MOUSE_ORT_DIRECTML_BUILD:INTERNAL=ON\n",
+        encoding="utf-8",
+    )
+    stage = tmp_path / "clean install with spaces"
+    for name in (*package.SETUP_FILES, "onnxruntime_providers_cuda.dll"):
+        (stage / name).unlink()
+    (stage / "onnxruntime_providers_tensorrt.dll").unlink()
+    added = {
+        "DirectML.dll": pe(),
+        "DIRECTML.md": b"# Mouse on DirectML\n",
+        "licenses/DirectML-LICENSE.txt": b"Microsoft DirectML licence\n",
+        "licenses/DirectML-ThirdPartyNotices.txt": b"DirectML third party notices\n",
+    }
+    for name, value in added.items():
+        (stage / name).write_bytes(value)
+    monkeypatch.setattr(
+        package,
+        "DIRECTML_ORT_SHA256",
+        {name: sha((stage / name).read_bytes()) for name in package.DIRECTML_ORT_SHA256},
+    )
+    monkeypatch.setattr(
+        package,
+        "DIRECTML_LICENSE_SHA256",
+        {name: sha((stage / name).read_bytes()) for name in package.DIRECTML_LICENSE_SHA256},
+    )
+    return source, build
+
+
+FP32_NET = b"plain graph \x0a\x0fmouse.precision\x12\x04fp32 end"
+FP16_NET = b"plain graph \x0a\x0fmouse.precision\x12\x04fp16 end"
+
+
+def test_directml_release_ships_its_runtime_its_guide_and_both_networks(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source, build = directml_release_fixture(tmp_path, monkeypatch)
+    net, net_fp16 = tmp_path / "a.onnx", tmp_path / "b.onnx"
+    net.write_bytes(FP32_NET)
+    net_fp16.write_bytes(FP16_NET)
+    output = tmp_path / "release"
+    result = package.produce_release(
+        source, build, "1.0.0-rc.1", output, net=net, net_fp16=net_fp16
+    )
+    assert result["status"] == "candidate_passed", result["errors"]
+    with zipfile.ZipFile(output / "mouse-1.0.0-rc.1-windows-x64-directml.zip") as archive:
+        names = set(archive.namelist())
+        assert {"mouse.exe", "DirectML.dll", "DIRECTML.md", "onnxruntime.dll"} <= names
+        assert "licenses/DirectML-LICENSE.txt" in names
+        # NVIDIA-only files stay out of the DirectML download.
+        assert not names & {*package.SETUP_FILES, "onnxruntime_providers_cuda.dll"}
+        assert "onnxruntime_providers_tensorrt.dll" not in names
+        assert archive.read(package.NET_NAME) == FP32_NET
+        assert archive.read(package.NET_FP16_NAME) == FP16_NET
+    assert not (output / "mouse-1.0.0-rc.1-windows-x64.zip").exists()
+
+
+def test_directml_release_refuses_networks_in_the_wrong_precision_or_with_the_plugin(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source, build = directml_release_fixture(tmp_path, monkeypatch)
+    fp32, fp16, plugin = tmp_path / "a.onnx", tmp_path / "b.onnx", tmp_path / "c.onnx"
+    fp32.write_bytes(FP32_NET)
+    fp16.write_bytes(FP16_NET)
+    plugin.write_bytes(b"graph with " + package.PLUGIN_OP + b" nodes")
+    for arguments, message in (
+        ({"net": fp16}, "fp32"),
+        ({"net": fp32, "net_fp16": fp32}, "fp16"),
+        ({"net": plugin}, "plugin"),
+    ):
+        with pytest.raises(package.PackageError, match=message):
+            package.produce_release(source, build, "1.0.0-rc.1", tmp_path / "release", **arguments)
+        assert not (tmp_path / "release").exists()
+
+
+def test_an_fp16_network_slot_exists_only_in_directml_releases(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source, build = release_fixture(tmp_path, monkeypatch)
+    net_fp16 = tmp_path / "b.onnx"
+    net_fp16.write_bytes(FP16_NET)
+    with pytest.raises(package.PackageError, match="DirectML"):
+        package.produce_release(
+            source, build, "1.0.0-rc.1", tmp_path / "release", net_fp16=net_fp16
+        )
+
+
+def test_directml_releases_accept_only_the_two_extra_windows_api_sets() -> None:
+    allowed = package.DIRECTML_PREREQUISITES
+    assert allowed.fullmatch("api-ms-win-appmodel-runtime-l1-1-0.dll")
+    assert allowed.fullmatch("api-ms-win-eventing-provider-l1-1-0.dll")
+    for name in ("nvcuda.dll", "api-ms-win-security-base-l1-1-0.dll", "evil.dll", "directml.dll"):
+        assert not allowed.fullmatch(name)
+
+
+def test_directml_release_refuses_an_nvidia_import(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from test_package import pe
+
+    source, build = directml_release_fixture(tmp_path, monkeypatch)
+    stage = tmp_path / "clean install with spaces"
+    (stage / "DirectML.dll").write_bytes(pe(("nvinfer_10.dll",)))
+    monkeypatch.setattr(
+        package,
+        "DIRECTML_ORT_SHA256",
+        {name: sha((stage / name).read_bytes()) for name in package.DIRECTML_ORT_SHA256},
+    )
+    # NVIDIA libraries are approved imports for NVIDIA builds only.
+    with pytest.raises(package.PackageError, match="NVIDIA"):
+        package.produce_release(source, build, "1.0.0-rc.1", tmp_path / "release")

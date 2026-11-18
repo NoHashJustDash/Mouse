@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "engine/chess/position.h"
 
+#include <algorithm>
 #include <array>
 #include <catch2/catch_test_macros.hpp>
 #include <charconv>
@@ -13,6 +14,7 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <vector>
 
 #include "engine/chess/attacks.h"
 #include "engine/chess/movegen.h"
@@ -411,4 +413,100 @@ TEST_CASE("Orthodox UCI mode rejects nonstandard and ambiguous castling tokens",
     auto stationary = Position::from_fen("4k3/8/8/8/8/8/8/6KR w H - 0 1", attacks);
     REQUIRE(stationary.has_value());
     CHECK_FALSE(parse_uci_move(*stationary, "g1g1", attacks, false).has_value());
+}
+
+namespace {
+// Sorted UCI names of the legal moves. Each move is also played to confirm that it
+// leaves the mover's king unattacked and that unmake restores the position.
+std::vector<std::string> sorted_legal_uci(Position& position, const AttackTables& attacks) {
+    std::vector<std::string> names;
+    const Color mover = position.side_to_move();
+    for (const Move move : legal_moves(position, attacks)) {
+        names.push_back(move_to_uci(move));
+        const Position before = position;
+        const Undo undo = position.make_move(move, attacks);
+        CHECK_FALSE(is_attacked(position, position.king_square(mover), opposite(mover), attacks));
+        position.unmake_move(move, undo);
+        CHECK(position == before);
+    }
+    std::ranges::sort(names);
+    return names;
+}
+void expect_legal(const AttackTables& attacks, std::string_view fen,
+                  std::vector<std::string> expected) {
+    INFO(fen);
+    auto parsed = Position::from_fen(fen, attacks);
+    REQUIRE(parsed.has_value());
+    std::ranges::sort(expected);
+    CHECK(sorted_legal_uci(*parsed, attacks) == expected);
+}
+}  // namespace
+
+TEST_CASE("Legal moves respect pins, checks, en passant and castling rules", "[chess]") {
+    const AttackTables attacks;
+    // Rook pinned on a file: only file moves, including capturing the pinner.
+    expect_legal(attacks, "4r2k/8/8/8/8/8/4R3/4K3 w - - 0 1",
+                 {"e2e3", "e2e4", "e2e5", "e2e6", "e2e7", "e2e8", "e1d1", "e1f1", "e1d2", "e1f2"});
+    // Bishop pinned on a diagonal moves along it; a knight pinned on a file has no move.
+    expect_legal(attacks, "r7/8/5b2/8/7k/N1B5/8/K7 w - - 0 1",
+                 {"c3b2", "c3d4", "c3e5", "c3f6", "a1a2", "a1b1", "a1b2"});
+    // Queen pinned on a rank.
+    expect_legal(
+        attacks, "7k/8/8/8/K1Q4q/8/8/8 w - - 0 1",
+        {"c4b4", "c4d4", "c4e4", "c4f4", "c4g4", "c4h4", "a4a3", "a4a5", "a4b3", "a4b4", "a4b5"});
+    // Pawn pinned on a file pushes once and twice but cannot capture.
+    expect_legal(attacks, "k3r3/8/8/8/8/3p1p2/4P3/4K3 w - - 0 1",
+                 {"e2e3", "e2e4", "e1d1", "e1f1", "e1d2", "e1f2"});
+    // Pawn pinned on a diagonal promotes only by capturing the pinner.
+    expect_legal(attacks, "4n1b1/5P2/4K3/8/8/8/8/7k w - - 0 1",
+                 {"f7g8q", "f7g8r", "f7g8b", "f7g8n", "e6d5", "e6e5", "e6f5", "e6d7", "e6e7"});
+    // Single rook check: capture, block, or step off the file. e1 is attacked only once
+    // the king has left e2.
+    expect_legal(attacks, "k7/4r3/2N5/6B1/8/8/4K3/8 w - - 0 1",
+                 {"c6e5", "c6e7", "g5e3", "g5e7", "e2d1", "e2f1", "e2d2", "e2f2", "e2d3", "e2f3"});
+    // Double check: only king moves, although the knight could capture or block.
+    expect_legal(attacks, "4r2k/8/8/8/1b6/8/2N5/4K3 w - - 0 1", {"e1d1", "e1f1", "e1f2"});
+    // Bishop check: e3 lies behind the king on the checking diagonal.
+    expect_legal(attacks, "7k/8/1b6/8/3K4/8/8/8 w - - 0 1",
+                 {"d4c3", "d4d3", "d4c4", "d4e4", "d4d5", "d4e5"});
+    // En passant would empty the king's rank in front of the rook.
+    expect_legal(attacks, "8/8/8/KPp4r/8/8/8/7k w - c6 0 1", {"b5b6", "a5a4", "a5a6", "a5b6"});
+    // The same for Black, with the capturing pawn beside the king.
+    expect_legal(attacks, "8/8/8/8/kPp4R/8/8/7K b - b3 0 1",
+                 {"c4c3", "a4a3", "a4b3", "a4b4", "a4b5"});
+    // En passant and an ordinary capture both remove the checking pawn.
+    expect_legal(attacks, "k7/8/8/3pP3/2P1K3/8/8/8 w - d6 0 1",
+                 {"c4d5", "e5d6", "e4d3", "e4e3", "e4f3", "e4d4", "e4f4", "e4d5", "e4f5"});
+    // A diagonally pinned pawn may capture en passant along the pin.
+    expect_legal(attacks, "1b6/8/8/3pP3/8/8/7K/k7 w - d6 0 1",
+                 {"e5d6", "h2g1", "h2h1", "h2g2", "h2g3", "h2h3"});
+    // A pawn pinned on its file may push but not capture en passant.
+    expect_legal(attacks, "k3r3/8/8/3pP3/8/8/8/4K3 w - d6 0 1",
+                 {"e5e6", "e1d1", "e1f1", "e1d2", "e1e2", "e1f2"});
+    // No castling out of check, and no rook move blocks the file.
+    expect_legal(attacks, "2k1r3/8/8/8/8/8/8/R3K2R w KQ - 0 1", {"e1d1", "e1f1", "e1d2", "e1f2"});
+    // Kingside castling crosses the attacked f1; queenside is legal although b1 is attacked.
+    expect_legal(attacks, "1rk2r2/8/8/8/8/8/8/R3K2R w KQ - 0 1",
+                 {"e1d1", "e1d2", "e1e2", "e1c1", "a1b1", "a1c1", "a1d1", "a1a2",
+                  "a1a3", "a1a4", "a1a5", "a1a6", "a1a7", "a1a8", "h1g1", "h1f1",
+                  "h1h2", "h1h3", "h1h4", "h1h5", "h1h6", "h1h7", "h1h8"});
+    // Promotions answering a check: blocking pushes and capturing the checker.
+    expect_legal(attacks, "K6r/4P1P1/8/8/8/8/8/7k w - - 0 1",
+                 {"e7e8q", "e7e8r", "e7e8b", "e7e8n", "g7g8q", "g7g8r", "g7g8b", "g7g8n", "g7h8q",
+                  "g7h8r", "g7h8b", "g7h8n", "a8a7", "a8b7"});
+}
+
+TEST_CASE("Legal move generation keeps the move-counter overflow error", "[chess]") {
+    const AttackTables attacks;
+    auto halfmove = Position::from_fen("7k/8/8/8/8/8/8/K7 w - - 18446744073709551615 1", attacks);
+    REQUIRE(halfmove.has_value());
+    const Position before = *halfmove;
+    CHECK_THROWS_AS(legal_moves(*halfmove, attacks), std::overflow_error);
+    CHECK(*halfmove == before);
+    // Pawn moves reset the clock, so a position with only pawn moves still has them all.
+    auto pawn_only =
+        Position::from_fen("7k/8/8/8/8/8/PPP5/KB6 w - - 18446744073709551615 1", attacks);
+    REQUIRE(pawn_only.has_value());
+    const std::vector<std::string> pawn_moves{"a2a3", "a2a4", "b2b3", "b2b4", "c2c3", "c2c4"};
+    CHECK(sorted_legal_uci(*pawn_only, attacks) == pawn_moves);
 }

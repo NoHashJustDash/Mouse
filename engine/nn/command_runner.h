@@ -7,7 +7,9 @@
 
 namespace mouse::nn {
 // Resolve user-selected model/cache paths against the current directory and
-// bind the app-local runtime. Never substitutes an artifact or provider.
+// bind the app-local runtime. Never substitutes an artifact or provider. With no GPU
+// library folder configured, the CUDA and TensorRT backends get the `gpu` folder beside
+// the executable when it exists (gpu_directories.h).
 [[nodiscard]] Result<void> resolve_backend_cli_paths(BackendConfig& config);
 // Standalone process commands. Output streams and the Windows stdout binary
 // mode are process resources; call only from main before starting other work.

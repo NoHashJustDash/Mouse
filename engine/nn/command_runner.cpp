@@ -18,6 +18,7 @@
 
 #include "engine/chess/attacks.h"
 #include "engine/nn/cached_backend.h"
+#include "engine/nn/gpu_directories.h"
 #include "engine/nn/history.h"
 #include "engine/util/build_info.h"
 #include "engine/util/sha256.h"
@@ -206,6 +207,8 @@ Result<void> resolve_backend_cli_paths(BackendConfig& config) {
     if (!executable) return tl::unexpected(executable.error());
     config.runtime_path = executable->parent_path() / build::runtime_filename;
     config.tensorrt_builder = *executable;
+    config.gpu_dll_directories = gpu_directories_or_default(std::move(config.gpu_dll_directories),
+                                                            config.kind, executable->parent_path());
     return {};
 }
 

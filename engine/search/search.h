@@ -51,6 +51,20 @@ struct SearchConfig {
     DrawRateParameters draw_rate;
     // Lc0 StickyEndgames.
     bool terminal_proof = true;
+    // How a proven node below the root is handled, each as Lc0 v0.32.1 does with StickyEndgames
+    // (none applies without terminal_proof, nor in the DAG search, except the prior of a move
+    // into a tablebase win, which Lc0 also clears without StickyEndgames). Each can be turned off
+    // on its own to bisect a regression.
+    // classic/search.cc MaybeSetBounds makes the node terminal and PickNodesToExtendTask never
+    // descends into a terminal node: a visit backs up its exact result without evaluating anything.
+    bool proof_stops_descent = true;
+    // classic/node.cc Node::MakeTerminal: a move into a position its side to move has won (a loss
+    // for the side that played it) gets prior 0, so PUCT no longer explores it.
+    bool proof_zeroes_losing_prior = true;
+    // classic/search.cc DoBackupUpdateSingleNode n_to_fix with classic/node.cc
+    // Node::AdjustForTerminal: when a node becomes proven, its unproven ancestors replace the
+    // samples it already passed them by its exact result, and its moves left become the proof's.
+    bool proof_adjusts_ancestors = true;
     GatherParameters gather;
     // Lc0 TwoFoldDraws, DrawScore (-1..1, from white's view), NodesPerSecondLimit (0 = off)
     // and HistoryFill.
@@ -160,12 +174,18 @@ struct SearchInfo {
 struct SearchStats {
     // Completed physical provider calls; cache hits and duplicate rows excluded.
     std::array<std::uint64_t, 1025> batch_sizes{};
+    // The same calls by the rows the search handed over, before the backend pads them:
+    // positions minus padding. With a deterministic NN cache the evaluator may still drop cached
+    // and duplicate rows from them, so there it can exceed what the provider computed.
+    std::array<std::uint64_t, 1025> logical_batch_sizes{};
     std::uint64_t collisions = 0, out_of_order = 0, proof_scans = 0, selection_hits = 0,
                   twofold_reverts = 0;
     std::chrono::nanoseconds gather{}, nn_wait{}, backup{}, provider{}, wall{};
     SearchStats& operator+=(const SearchStats& other) noexcept {
-        for (std::size_t i = 0; i < batch_sizes.size(); ++i)
+        for (std::size_t i = 0; i < batch_sizes.size(); ++i) {
             batch_sizes.at(i) += other.batch_sizes.at(i);
+            logical_batch_sizes.at(i) += other.logical_batch_sizes.at(i);
+        }
         collisions += other.collisions;
         out_of_order += other.out_of_order;
         proof_scans += other.proof_scans;

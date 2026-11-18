@@ -2,6 +2,8 @@
 #include "engine/chess/movegen.h"
 
 #include <bit>
+#include <cstdint>
+#include <limits>
 #include <optional>
 #include <stdexcept>
 
@@ -45,13 +47,17 @@ Result<void> validate_uci_castling_mode(const Position& position, bool chess960)
     return {};
 }
 namespace {
-void emit_pawn(MoveList& result, Square from, Square to, MoveKind kind = MoveKind::Normal) {
+// `accept(from, to, kind)` decides whether a generated move is kept. Promotion choices
+// share one origin and destination, so one decision covers all four.
+template <typename Accept>
+void emit_pawn(MoveList& result, Square from, Square to, const Accept& accept) {
+    if (!accept(from, to, MoveKind::Normal)) return;
     if (rank_of(to) == 0 || rank_of(to) == 7) {
         for (const PieceType promotion :
              {PieceType::Queen, PieceType::Rook, PieceType::Bishop, PieceType::Knight})
             result.push_back({from, to, promotion});
     } else
-        result.push_back({from, to, PieceType::None, kind});
+        result.push_back({from, to});
 }
 Bitboard horizontal_path(Square from, Square to) {
     assert(rank_of(from) == rank_of(to));
@@ -88,8 +94,12 @@ bool can_castle(const Position& position, bool kingside, const AttackTables& att
     }
     return true;
 }
-MoveList pseudo_legal_moves(const Position& position, const AttackTables& attacks) {
-    MoveList result;
+// Pseudo-legal non-castling moves in the fixed generation order: pawns (push, double push,
+// captures, en passant), then knights, bishops, rooks, queens and the king. Search and policy
+// mapping consume moves in this order, so `accept` may only drop moves, never reorder them.
+template <typename Accept>
+void generate_moves(const Position& position, const AttackTables& attacks, MoveList& result,
+                    const Accept& accept) {
     const Color us = position.side_to_move();
     const Color them = opposite(us);
     const Bitboard occupied = position.occupancy();
@@ -102,20 +112,22 @@ MoveList pseudo_legal_moves(const Position& position, const AttackTables& attack
         const int forward = us == Color::White ? 8 : -8;
         const auto to = static_cast<Square>(static_cast<int>(from) + forward);
         if ((occupied & bit(to)) == 0) {
-            emit_pawn(result, from, to);
+            emit_pawn(result, from, to, accept);
             if (rank_of(from) == (us == Color::White ? 1 : 6)) {
                 const auto twice = static_cast<Square>(static_cast<int>(to) + forward);
-                if ((occupied & bit(twice)) == 0) result.push_back({from, twice});
+                if ((occupied & bit(twice)) == 0 && accept(from, twice, MoveKind::Normal))
+                    result.push_back({from, twice});
             }
         }
         Bitboard captures = attacks.pawn(us, from) & capturable;
         while (captures != 0) {
             const auto target = static_cast<Square>(std::countr_zero(captures));
             captures &= captures - 1;
-            emit_pawn(result, from, target);
+            emit_pawn(result, from, target, accept);
         }
         if (position.en_passant_square() != kNoSquare &&
-            (attacks.pawn(us, from) & bit(position.en_passant_square())) != 0)
+            (attacks.pawn(us, from) & bit(position.en_passant_square())) != 0 &&
+            accept(from, position.en_passant_square(), MoveKind::EnPassant))
             result.push_back(
                 {from, position.en_passant_square(), PieceType::None, MoveKind::EnPassant});
     }
@@ -151,25 +163,139 @@ MoveList pseudo_legal_moves(const Position& position, const AttackTables& attack
             while (targets != 0) {
                 const auto to = static_cast<Square>(std::countr_zero(targets));
                 targets &= targets - 1;
-                result.push_back({from, to});
+                if (accept(from, to, MoveKind::Normal)) result.push_back({from, to});
             }
         }
     }
+}
+Move castle_move(const Position& position, bool kingside) {
+    const Color us = position.side_to_move();
+    return {position.king_square(us), position.castling_rook(us, kingside), PieceType::None,
+            MoveKind::Castle};
+}
+// Castling moves follow every other move, queenside first.
+MoveList pseudo_legal_moves(const Position& position, const AttackTables& attacks) {
+    MoveList result;
+    generate_moves(position, attacks, result, [](Square, Square, MoveKind) { return true; });
     for (const bool kingside : {false, true})
         if (can_castle(position, kingside, attacks))
-            result.push_back({position.king_square(us), position.castling_rook(us, kingside),
-                              PieceType::None, MoveKind::Castle});
+            result.push_back(castle_move(position, kingside));
     return result;
 }
+// The complete test: play the move and look at the mover's king.
+bool keeps_king_safe(Position& position, Move move, const AttackTables& attacks) {
+    const Color us = position.side_to_move();
+    const Undo undo = position.make_move(move, attacks);
+    const bool legal = !is_attacked(position, position.king_square(us), opposite(us), attacks);
+    position.unmake_move(move, undo);
+    return legal;
+}
+// make_move throws std::overflow_error for a move that would overflow a move counter
+// (position.cpp). Callers (perft, parse_uci_move, search classify_leaf) report that error,
+// so these positions keep the complete per-move test, which raises it exactly as before.
+bool at_counter_limit(const Position& position) noexcept {
+    constexpr auto kMaximum = std::numeric_limits<std::uint64_t>::max();
+    return position.halfmove_clock() == kMaximum ||
+           (position.side_to_move() == Color::Black && position.fullmove_number() == kMaximum);
+}
+// Squares strictly between two squares that share a rank, file or diagonal.
+Bitboard squares_between(Square a, Square b, const AttackTables& attacks) {
+    if (file_of(a) == file_of(b) || rank_of(a) == rank_of(b))
+        return attacks.rook(a, bit(b)) & attacks.rook(b, bit(a));
+    return attacks.bishop(a, bit(b)) & attacks.bishop(b, bit(a));
+}
+// Every square of the whole line through two squares that share a rank, file or
+// diagonal, except those two squares.
+Bitboard line_through(Square a, Square b, const AttackTables& attacks) {
+    if (file_of(a) == file_of(b) || rank_of(a) == rank_of(b))
+        return attacks.rook(a, Bitboard{0}) & attacks.rook(b, Bitboard{0});
+    return attacks.bishop(a, Bitboard{0}) & attacks.bishop(b, Bitboard{0});
+}
+// What makes a move legal for the side to move, computed once per position.
+struct Legality {
+    Square king = kNoSquare;
+    Bitboard occupied_without_king = 0;
+    // Destinations of non-king moves that leave no check: everything when not in check,
+    // otherwise the checker and the squares between it and the king.
+    Bitboard check_mask = ~Bitboard{0};
+    bool double_check = false;
+    // Our pieces that are the only piece between our king and an enemy slider.
+    Bitboard pinned = 0;
+};
+Legality legality_of(const Position& position, const AttackTables& attacks) {
+    const Color us = position.side_to_move();
+    const Color them = opposite(us);
+    Legality result;
+    result.king = position.king_square(us);
+    const Bitboard occupied = position.occupancy();
+    result.occupied_without_king = occupied & ~bit(result.king);
+    const Bitboard queens = position.pieces(them, PieceType::Queen);
+    const Bitboard orthogonal = position.pieces(them, PieceType::Rook) | queens;
+    const Bitboard diagonal = position.pieces(them, PieceType::Bishop) | queens;
+    const Bitboard checkers = attackers_to(position, result.king, them, attacks);
+    if (checkers != 0) {
+        result.double_check = (checkers & (checkers - 1)) != 0;
+        result.check_mask = checkers;
+        // A sliding checker can also be blocked; a pawn or knight only captured.
+        if (!result.double_check && (checkers & (orthogonal | diagonal)) != 0)
+            result.check_mask |= squares_between(
+                result.king, static_cast<Square>(std::countr_zero(checkers)), attacks);
+    }
+    Bitboard snipers = (attacks.rook(result.king, Bitboard{0}) & orthogonal) |
+                       (attacks.bishop(result.king, Bitboard{0}) & diagonal);
+    const Bitboard ours = position.occupancy(us);
+    while (snipers != 0) {
+        const auto sniper = static_cast<Square>(std::countr_zero(snipers));
+        snipers &= snipers - 1;
+        const Bitboard blockers = squares_between(result.king, sniper, attacks) & occupied;
+        if (blockers != 0 && (blockers & (blockers - 1)) == 0 && (blockers & ours) != 0)
+            result.pinned |= blockers;
+    }
+    return result;
+}
+// The en passant test of Position::effective_en_passant: the king stays put, the capturing
+// pawn and the captured pawn leave their squares, and the capturing pawn lands on the target.
+// This covers a pawn pinned on a diagonal, both pawns leaving one rank, and capturing a
+// checking pawn.
+bool en_passant_keeps_king_safe(const Position& position, Square from, Square to,
+                                const AttackTables& attacks) {
+    const Color us = position.side_to_move();
+    const auto captured = static_cast<Square>(static_cast<int>(to) + (us == Color::White ? -8 : 8));
+    const Bitboard occupied = (position.occupancy() & ~bit(from) & ~bit(captured)) | bit(to);
+    return !is_attacked(position, position.king_square(us), opposite(us), attacks,
+                        AttackView{.occupied = occupied, .removed = bit(captured)});
+}
 }  // namespace
+// Pin- and check-aware legality: checkers and pinned pieces are found once, so ordinary
+// moves need no make/unmake. Castling keeps the complete test. The result is the
+// pseudo-legal list in its original order with exactly the illegal moves removed.
 MoveList legal_moves(Position& position, const AttackTables& attacks) {
     MoveList result;
-    const Color us = position.side_to_move();
-    for (const Move move : pseudo_legal_moves(position, attacks)) {
-        const Undo undo = position.make_move(move, attacks);
-        const bool legal = !is_attacked(position, position.king_square(us), opposite(us), attacks);
-        position.unmake_move(move, undo);
-        if (legal) result.push_back(move);
+    if (at_counter_limit(position)) {
+        for (const Move move : pseudo_legal_moves(position, attacks))
+            if (keeps_king_safe(position, move, attacks)) result.push_back(move);
+        return result;
+    }
+    const Legality legality = legality_of(position, attacks);
+    const Color them = opposite(position.side_to_move());
+    const auto accept = [&](Square from, Square to, MoveKind kind) {
+        if (kind == MoveKind::EnPassant)
+            return en_passant_keeps_king_safe(position, from, to, attacks);
+        // The king must not be attacked on its destination. It is removed from the
+        // occupancy so that it cannot shield that square from a slider checking it.
+        if (from == legality.king)
+            return !is_attacked(position, to, them, attacks,
+                                AttackView{.occupied = legality.occupied_without_king});
+        if (legality.double_check || (legality.check_mask & bit(to)) == 0) return false;
+        // A pinned piece stays on the line through its king and the pinning slider.
+        return (legality.pinned & bit(from)) == 0 ||
+               (line_through(legality.king, from, attacks) & bit(to)) != 0;
+    };
+    generate_moves(position, attacks, result, accept);
+    for (const bool kingside : {false, true}) {
+        if (!can_castle(position, kingside, attacks)) continue;
+        const Move castle = castle_move(position, kingside);
+        if (keeps_king_safe(position, castle, attacks)) result.push_back(castle);
     }
     return result;
 }

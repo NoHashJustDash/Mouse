@@ -582,6 +582,78 @@ TEST_CASE("Search diagnostics count completed provider rows and reset per run",
     CHECK(disabled->stats.wall.count() == 0);
 }
 
+namespace {
+// Pads every call to a multiple of eight rows, as a provider with fixed batch shapes does.
+struct PaddingBackend final : mouse::nn::Backend {
+    mouse::nn::ModelMetadata model;
+    mouse::nn::BackendInfo identity;
+    std::size_t calls = 0, rows = 0;
+    PaddingBackend() {
+        model.input_format = 1;
+        identity.onnx_sha256 = "pipeline-padding";
+    }
+    [[nodiscard]] mouse::Result<void> evaluate(std::span<const mouse::nn::InputPlanes> inputs,
+                                               std::span<mouse::nn::NNOutput> outputs) override {
+        ++calls;
+        rows += inputs.size();
+        for (auto& output : outputs) {
+            mouse::nn::NNOutput value;
+            value.wdl = {0.5F, 0.25F, 0.25F};
+            output = value;
+        }
+        return {};
+    }
+    [[nodiscard]] std::size_t physical_batch_size(std::size_t logical) const noexcept override {
+        return (logical + 7) / 8 * 8;
+    }
+    [[nodiscard]] const mouse::nn::ModelMetadata& metadata() const noexcept override {
+        return model;
+    }
+    [[nodiscard]] const mouse::nn::BackendInfo& info() const noexcept override { return identity; }
+};
+}  // namespace
+
+TEST_CASE("Search diagnostics keep the logical rows beside the padded provider rows",
+          "[search][pipeline][search-stats]") {
+    mouse::chess::AttackTables attacks;
+    const auto root = *mouse::chess::Position::from_fen(mouse::chess::kStartFen, attacks);
+    mouse::nn::EncodingHistory history;
+    history.reset(root);
+    PaddingBackend backend;
+    mouse::search::SearchConfig config;
+    config.threads = 1;
+    config.maximum_batch = 4;
+    config.max_depth = 32;
+    config.ram_limit_bytes = 8U << 20U;
+    config.deterministic = true;
+    auto engine = mouse::search::SearchEngine::create(config, attacks, backend);
+    REQUIRE(engine);
+    REQUIRE((*engine)->set_position(root, history));
+    mouse::search::SearchLimits limits;
+    limits.nodes = 257;
+    limits.smart_pruning = false;
+    limits.log_search_stats = true;
+    const auto result = (*engine)->run(limits);
+    REQUIRE(result);
+    REQUIRE(result->info.nodes == 257);
+    const auto& stats = result->stats;
+    std::uint64_t batches = 0, positions = 0, logical_batches = 0, logical_rows = 0;
+    for (std::size_t size = 0; size < stats.batch_sizes.size(); ++size) {
+        batches += stats.batch_sizes.at(size);
+        positions += size * stats.batch_sizes.at(size);
+        logical_batches += stats.logical_batch_sizes.at(size);
+        logical_rows += size * stats.logical_batch_sizes.at(size);
+        if (size % 8 != 0) {
+            CHECK(stats.batch_sizes.at(size) == 0);
+        }
+    }
+    CHECK(batches == backend.calls);
+    CHECK(logical_batches == backend.calls);
+    CHECK(logical_rows == backend.rows);
+    CHECK(logical_rows == 257);
+    CHECK(positions == 8 * backend.calls);
+}
+
 TEST_CASE("Snapshot cost scopes measure every reader and restore thread-local nesting",
           "[search][pipeline][snapshot-cost]") {
     Fixture fixture;

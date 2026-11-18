@@ -24,7 +24,8 @@ TEST_CASE("Search CLI requires explicit weights provider and precision", "[searc
     CHECK(result->limits.nodes == 800);
     CHECK(result->config.maximum_batch == 64);
     CHECK(result->config.moves_left_utility);
-    CHECK(result->neural.backend.batch_buckets == std::vector<std::size_t>{1, 8, 32, 64});
+    CHECK(result->neural.backend.batch_buckets ==
+          std::vector<std::size_t>{1, 8, 12, 16, 23, 32, 46, 64});
     CHECK_FALSE(parse({"--weights", "model", "--precision", "fp32"}));
     CHECK_FALSE(parse({"--weights", "model", "--backend", "cpu"}));
     CHECK_FALSE(parse({"--backend", "cpu", "--precision", "fp32"}));
@@ -40,7 +41,7 @@ TEST_CASE("Search CLI preserves explicit history and mode", "[search][commands]"
     CHECK(result->chess960);
     CHECK(result->config.threads == 8);
     CHECK(result->config.maximum_batch == 16);
-    CHECK(result->neural.backend.batch_buckets == std::vector<std::size_t>{1, 8, 16});
+    CHECK(result->neural.backend.batch_buckets == std::vector<std::size_t>{1, 8, 12, 16});
     CHECK(result->neural.backend.deterministic_compute);
     CHECK(result->neural.cache_bytes == 2097152);
     CHECK(result->limits.nodes == 900);

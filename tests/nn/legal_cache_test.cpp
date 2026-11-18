@@ -45,6 +45,8 @@ struct Provider final : Backend {
     BackendInfo identity;
     std::size_t calls = 0, rows = 0;
     bool bad = false, partial = false, fail = false;
+    bool out_of_range = false;
+    const InputPlanes* submitted = nullptr;
     Provider() {
         model.input_format = 1;
         identity.cache_namespace = "legal-test";
@@ -55,6 +57,7 @@ struct Provider final : Backend {
                                  std::span<NNOutput> out) override {
         ++calls;
         rows += in.size();
+        submitted = in.data();
         for (std::size_t i = 0; i < in.size(); ++i) {
             if (partial && i + 1 == in.size()) continue;
             out[i] = {};
@@ -64,6 +67,7 @@ struct Provider final : Backend {
                 out[i].policy_logits.at(j) =
                     static_cast<float>(in[i][0].mask) + static_cast<float>(j) * 0.123456791F;
             if (bad) out[i].policy_logits[1856] = std::numeric_limits<float>::quiet_NaN();
+            if (out_of_range && i + 1 == in.size()) out[i].wdl[1] = 1.5F;
         }
         if (fail) return tl::unexpected(std::string{"provider failure"});
         return {};
@@ -217,7 +221,12 @@ TEST_CASE("Legal cache and raw backend preserve deterministic node visitation",
                                              .threads = 1,
                                              .maximum_batch = 4,
                                              .ram_limit_bytes = 8U << 20U,
-                                             .deterministic = true};
+                                             .deterministic = true,
+                                             .moves_left = {},
+                                             .draw_rate = {},
+                                             .gather = {},
+                                             .tablebase = {},
+                                             .temperature = {}};
     auto raw = mouse::search::SearchEngine::create(config, attacks, raw_provider);
     auto cached = mouse::search::SearchEngine::create(config, attacks, cached_provider, c.get());
     REQUIRE(raw);
@@ -333,6 +342,68 @@ TEST_CASE("A zero-capacity legal cache preserves the uncached physical batch",
     CHECK(provider.calls == 2);
 }
 
+TEST_CASE("A cache-off legal evaluator submits caller rows in order without copying them",
+          "[nn][legal-cache]") {
+    Provider provider;
+    LegalEvaluator evaluator(provider, 4);
+    const std::array inputs{input(3), input(1), input(3), input(2)};
+    std::array policies{policy(), policy(), policy(), policy()};
+    policies[2].values[0] = 11;
+    const auto expect_rows = [&](std::span<const LegalOutput> outputs, std::size_t first) {
+        for (std::size_t row = 0; row < outputs.size(); ++row) {
+            const auto& legal = policies.at(first + row);
+            for (std::size_t j = 0; j < legal.size; ++j)
+                CHECK(outputs[row].logits.at(j) ==
+                      static_cast<float>(inputs.at(first + row)[0].mask) +
+                          static_cast<float>(legal.values.at(j)) * 0.123456791F);
+        }
+    };
+    std::array<LegalOutput, 4> outputs{};
+    REQUIRE(evaluator.evaluate(inputs, policies, outputs));
+    // Duplicates stay separate rows and the provider reads the caller's own storage.
+    CHECK(provider.calls == 1);
+    CHECK(provider.rows == 4);
+    CHECK(provider.submitted == inputs.data());
+    expect_rows(outputs, 0);
+    // A smaller later batch returns only its own rows and leaves the rest unchanged.
+    auto smaller = outputs;
+    REQUIRE(evaluator.evaluate(std::span{inputs}.subspan(1, 2), std::span{policies}.subspan(1, 2),
+                               std::span{smaller}.first(2)));
+    CHECK(provider.submitted == inputs.data() + 1);
+    CHECK(provider.rows == 6);
+    expect_rows(std::span{smaller}.first(2), 1);
+    CHECK(smaller[2] == outputs[2]);
+    CHECK(smaller[3] == outputs[3]);
+}
+
+TEST_CASE("A cache-off legal evaluator rejects invalid or incomplete provider rows",
+          "[nn][legal-cache]") {
+    Provider provider;
+    LegalEvaluator evaluator(provider, 4);
+    const std::array inputs{input(1), input(2), input(3)};
+    const std::array policies{policy(), policy(), policy()};
+    std::array<LegalOutput, 3> outputs{};
+    REQUIRE(evaluator.evaluate(inputs, policies, outputs));
+    const auto expected = outputs;
+    const std::array<LegalOutput, 3> untouched{};
+    // NaN in an illegal slot, an unwritten last row, a provider error and an
+    // out-of-range WDL value in the last row each fail the whole batch unpublished.
+    for (const unsigned mode : {0U, 1U, 2U, 3U}) {
+        INFO("mode " << mode);
+        provider.bad = mode == 0;
+        provider.partial = mode == 1;
+        provider.fail = mode == 2;
+        provider.out_of_range = mode == 3;
+        std::array<LegalOutput, 3> changed{};
+        CHECK_FALSE(evaluator.evaluate(inputs, policies, changed));
+        CHECK(changed == untouched);
+    }
+    provider.out_of_range = false;
+    std::array<LegalOutput, 3> recovered{};
+    REQUIRE(evaluator.evaluate(inputs, policies, recovered));
+    CHECK(recovered == expected);
+}
+
 TEST_CASE("Legal cache capacity allocates entries and legal payloads on demand",
           "[nn][legal-cache][cache-memory-v2]") {
     constexpr std::size_t capacity = 10000;
@@ -415,4 +486,115 @@ TEST_CASE("Legal cache history length keys only the configured earlier frames",
     auto other_rule50 = stored;
     other_rule50[109].value = 8.0F;  // lc0 HashLast also mixes in rule50
     CHECK_FALSE(hit(**current, other_rule50));
+}
+
+TEST_CASE("Legal cache can key on the board and repetitions without rule 50 as Lc0 does",
+          "[nn][legal-cache][cache-history]") {
+    // Lc0 v0.32.1 neural/memcache.cc ComputeEvalPositionHash keys on
+    // chess/position.cc Position::Hash(): board (castling and side to move
+    // included) plus repetitions, but not rule 50.
+    auto lc0 =
+        LegalCache::create(4, "legal-test", 0, {.key_rule50 = false, .reserve_index = false});
+    auto strict =
+        LegalCache::create(4, "legal-test", 0, {.key_rule50 = true, .reserve_index = false});
+    auto full = LegalCache::create(4, "legal-test");
+    REQUIRE(lc0);
+    REQUIRE(strict);
+    REQUIRE(full);
+    CHECK_FALSE((*lc0)->keys_rule50());
+    CHECK((*lc0)->history_length() == 0);
+    CHECK((*strict)->keys_rule50());
+    CHECK((*full)->keys_rule50());
+    CHECK((*full)->history_length() == LegalCache::kFullCacheHistory);
+    CHECK_FALSE(LegalCache::create(4, "legal-test", LegalCache::kFullCacheHistory,
+                                   {.key_rule50 = false, .reserve_index = false}));
+
+    // Encode one position at two 50-move counts so the test pins the plane the
+    // real encoder uses for rule 50, not an assumed index.
+    const mouse::chess::AttackTables attacks;
+    const auto encode = [&](std::string_view fen) {
+        const auto position = mouse::chess::Position::from_fen(fen, attacks);
+        REQUIRE(position);
+        const std::array frames{HistoryFrame::capture(*position)};
+        auto planes = encode_classical(frames, 1, HistoryFill::No);
+        REQUIRE(planes);
+        return *planes;
+    };
+    const auto early = encode("r3k2r/8/8/8/8/8/8/R3K2R w KQkq - 0 40");
+    const auto late = encode("r3k2r/8/8/8/8/8/8/R3K2R w KQkq - 37 40");
+    for (std::size_t plane = 0; plane < early.size(); ++plane)
+        CHECK((early.at(plane) == late.at(plane)) == (plane != 109));
+
+    const auto p = policy();
+    const auto r = result();
+    for (auto* c : {lc0->get(), strict->get(), full->get()}) REQUIRE(c->insert(early, p, r));
+    const auto hit = [&](LegalCache& c, const InputPlanes& key) {
+        auto found = c.lookup(key, p);
+        REQUIRE(found);
+        return found->has_value();
+    };
+    CHECK(hit(**lc0, late));
+    CHECK_FALSE(hit(**strict, late));
+    CHECK_FALSE(hit(**full, late));
+    const auto served = (*lc0)->lookup(late, p);
+    REQUIRE(served);
+    REQUIRE(*served);
+    CHECK(mouse::tests::required_optional(*served) == r);
+
+    // Frame-0 repetition (12), castling (104..107) and side to move (108)
+    // are part of Lc0's key, so a change to any of them must miss.
+    const auto flip = [](InputPlanes key, std::size_t plane) {
+        key.at(plane).mask ^= std::numeric_limits<std::uint64_t>::max();
+        return key;
+    };
+    for (const std::size_t plane : {std::size_t{12}, std::size_t{104}, std::size_t{105},
+                                    std::size_t{106}, std::size_t{107}, std::size_t{108}}) {
+        CHECK_FALSE(hit(**lc0, flip(late, plane)));
+        CHECK_FALSE(hit(**strict, flip(early, plane)));
+        CHECK_FALSE(hit(**full, flip(early, plane)));
+    }
+    CHECK((*lc0)->stats().entries == 1);
+}
+
+TEST_CASE("A reserved legal cache index never rehashes while filling",
+          "[nn][legal-cache][cache-memory-v2]") {
+    constexpr std::size_t capacity = 1000;
+    auto reserved = LegalCache::create(capacity, "legal-test", LegalCache::kFullCacheHistory,
+                                       {.key_rule50 = true, .reserve_index = true});
+    auto lazy = LegalCache::create(capacity, "legal-test");
+    REQUIRE(reserved);
+    REQUIRE(lazy);
+    CHECK((*reserved)->reserves_index());
+    CHECK_FALSE((*lazy)->reserves_index());
+    const auto buckets = (*reserved)->index_bucket_count();
+    const auto lazy_buckets = (*lazy)->index_bucket_count();
+    // insert() holds capacity + 1 keys before evicting, so that many must fit.
+    CHECK(buckets >= capacity + 1);
+    CHECK((*reserved)->stats().charged_bytes <= (*reserved)->stats().budget_bytes);
+    const auto p = policy();
+    const auto r = result();
+    bool stable = true;
+    for (std::uint64_t i = 0; i < capacity + 100; ++i) {
+        REQUIRE((*reserved)->insert(input(i), p, r));
+        REQUIRE((*lazy)->insert(input(i), p, r));
+        stable = stable && (*reserved)->index_bucket_count() == buckets;
+    }
+    CHECK(stable);
+    // The unreserved index grew over the same inserts, so the check above
+    // would fail without the reserve.
+    CHECK((*lazy)->index_bucket_count() > lazy_buckets);
+    const auto filled = (*reserved)->stats();
+    CHECK(filled.entries == capacity);
+    CHECK(filled.evictions == 100);
+    CHECK(filled.charged_bytes <= filled.budget_bytes);
+    (*reserved)->clear();
+    CHECK((*reserved)->index_bucket_count() == buckets);
+    for (std::uint64_t i = 0; i < capacity; ++i) REQUIRE((*reserved)->insert(input(i), p, r));
+    CHECK((*reserved)->index_bucket_count() == buckets);
+
+    auto disabled = LegalCache::create(0, "legal-test", LegalCache::kFullCacheHistory,
+                                       {.key_rule50 = true, .reserve_index = true});
+    REQUIRE(disabled);
+    CHECK((*disabled)->index_bucket_count() == 0);
+    CHECK((*disabled)->stats().charged_bytes == sizeof(LegalCache));
 }

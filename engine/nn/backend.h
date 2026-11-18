@@ -90,6 +90,12 @@ class Backend {
 // multiprocessor count ("simple heuristic that seems to work for a wide range
 // of GPUs"), capped at the 1024 maximum. CPU: Mouse's fixed 64.
 [[nodiscard]] Result<std::size_t> recommended_minibatch(const BackendConfig& config);
+// The batch sizes a GPU backend is built for when the largest is `batch`: 1, 8, at most five
+// geometric steps between 8 and the batch, then the batch. A batch is padded up to the next
+// of these and the padding runs through the network, so with at most eight sizes a batch of 8
+// or more rows costs at most 1.5x its size up to a largest batch of 96, and at most
+// (batch / 8)^(1/6) times above that. Each size is one more TensorRT engine to build.
+[[nodiscard]] std::vector<std::size_t> batch_buckets_for(std::size_t batch);
 // DirectML reports no multiprocessor count, so its automatic minibatch is fixed. M1 on an
 // RTX 5070 through DirectML (2026-10-27, five-position UCI search, GPU shared with
 // training): FP32 5,242 / 5,789 / 5,182 nps at 64 / 128 / 256, FP16 6,915 / 8,238 / 8,064.

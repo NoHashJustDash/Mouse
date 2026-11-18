@@ -165,8 +165,10 @@ class Tree {
     // classic/node.cc RevertTerminalVisits: `leaf` is a twofold terminal whose
     // earlier occurrence is now above the root. Remove its visits, draws and
     // moves-left samples (cycle + distance each) from `ancestors` (root..parent)
-    // and make it an unexpanded node. Returns the visits removed. Fails without
-    // changing anything for a leaf with visits in flight or inconsistent counts.
+    // and make it an unexpanded node. A proven root keeps its exact value and mean
+    // moves left at the reduced count. Returns the visits removed. Fails without
+    // changing anything for a leaf with visits in flight, inconsistent counts, or
+    // a proven ancestor other than the root, above which the draws were replaced.
     [[nodiscard]] Result<std::uint64_t> revert_twofold(std::span<const NodeId> ancestors,
                                                        NodeId leaf);
     // Lc0 fd71a2d classic/node.cc MakeSolid: gives every edge of an expanded node a child in one

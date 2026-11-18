@@ -2,6 +2,7 @@
 #include "engine/search/tree.h"
 
 #include <algorithm>
+#include <array>
 #include <bit>
 #include <limits>
 #include <new>
@@ -38,7 +39,8 @@ Result<std::unique_ptr<Tree>> Tree::create(std::size_t budget_bytes, bool dag) {
     auto available = budget_bytes < fixed_bytes ? 0 : budget_bytes - fixed_bytes;
     std::size_t low_capacity = 0, table_slots = 0;
     if (dag) {
-        const auto per_low = kArenaBytesPerLow + sizeof(LowNode) + kTableSlotsPerLow * sizeof(LowId);
+        const auto per_low =
+            kArenaBytesPerLow + sizeof(LowNode) + kTableSlotsPerLow * sizeof(LowId);
         low_capacity = std::max<std::size_t>(available / per_low, 1);
         table_slots = std::bit_ceil(low_capacity * kTableSlotsPerLow);
         const auto low_bytes = low_capacity * sizeof(LowNode) + table_slots * sizeof(LowId);
@@ -132,12 +134,20 @@ Result<void> Tree::validate_seeds(std::span<const EdgeSeed> seeds) const {
         return tl::unexpected(std::string{"Tree expansion requires 1..65535 move seeds"});
     if (seeds.size() > free_bytes() / sizeof(Edge))
         return tl::unexpected(std::string{"Tree edges full"});
+    // One bit per origin and target square seen so far. Only moves that share both squares
+    // (promotions, or a repeat) are compared with the earlier seeds.
+    std::array<chess::Bitboard, 64> targets{};
     for (std::size_t index = 0; index < seeds.size(); ++index) {
         if (seeds[index].prior_bits > 0x3c00)
             return tl::unexpected(std::string{"Tree prior must encode nonnegative IEEE half <=1"});
-        for (std::size_t earlier = 0; earlier < index; ++earlier)
-            if (seeds[index].move == seeds[earlier].move)
-                return tl::unexpected(std::string{"Tree expansion contains duplicate moves"});
+        const auto move = seeds[index].move;
+        auto& seen = targets.at(move.from());
+        const auto target = chess::bit(move.to());
+        if ((seen & target) != 0)
+            for (std::size_t earlier = 0; earlier < index; ++earlier)
+                if (move == seeds[earlier].move)
+                    return tl::unexpected(std::string{"Tree expansion contains duplicate moves"});
+        seen |= target;
     }
     return {};
 }
@@ -216,7 +226,8 @@ void Tree::insert_low(LowId id) noexcept {
 }
 Result<LowId> Tree::create_low(std::uint64_t key, std::span<const EdgeSeed> seeds, bool in_table) {
     if (low_table_.empty()) return tl::unexpected(std::string{"Tree has no low nodes"});
-    if (low_count_ == stats_.low_capacity) return tl::unexpected(std::string{"Tree low nodes full"});
+    if (low_count_ == stats_.low_capacity)
+        return tl::unexpected(std::string{"Tree low nodes full"});
     auto valid = validate_seeds(seeds);
     if (!valid) return tl::unexpected(valid.error());
     place_edges(seeds);
@@ -224,7 +235,9 @@ Result<LowId> Tree::create_low(std::uint64_t key, std::span<const EdgeSeed> seed
     lows_[id] = LowNode{.key = key,
                         .first_edge = edge_low_,
                         .edge_count = static_cast<std::uint16_t>(seeds.size()),
-                        .in_table = in_table};
+                        .in_table = in_table,
+                        .leaf_moves_left = std::nullopt,
+                        .proof = {}};
     if (in_table) insert_low(id);
     return id;
 }
@@ -443,29 +456,42 @@ Result<std::uint64_t> Tree::revert_twofold(std::span<const NodeId> ancestors, No
         return tl::unexpected(std::string{"Tree twofold revert needs a quiescent terminal"});
     const auto visits = terminal.visits;
     const auto cycle = static_cast<double>(*terminal.leaf_moves_left);
-    for (const auto id : ancestors) {
-        const auto& current = node(id);
-        if (current.visits < visits || current.moves_left_samples < visits)
+    for (std::size_t index = 0; index < ancestors.size(); ++index) {
+        const auto& current = node(ancestors[index]);
+        const bool proven = current.proof.outcome != ProofOutcome::Unknown;
+        // A proven node below the root replaced the draws for every ancestor above it, by its
+        // exact result from whenever it was proven, so they can no longer be removed.
+        if (proven && index != 0)
+            return tl::unexpected(std::string{"Tree twofold revert below a proven non-root node"});
+        if (current.visits < visits || (!proven && current.moves_left_samples < visits))
             return tl::unexpected(std::string{"Tree twofold revert exceeds ancestor visits"});
     }
     for (std::size_t index = 0; index < ancestors.size(); ++index) {
         auto& current = node(ancestors[index]);
-        // Each sample was backed up as cycle + its distance from the terminal.
-        const auto distance = static_cast<double>(ancestors.size() - index);
         current.visits -= visits;
-        current.moves_left_samples -= visits;
-        current.moves_left_sum -= static_cast<double>(visits) * (cycle + distance);
         if (current.proof.outcome == ProofOutcome::Unknown) {
+            // Each sample was backed up as cycle + its distance from the terminal.
+            const auto distance = static_cast<double>(ancestors.size() - index);
+            current.moves_left_samples -= visits;
+            current.moves_left_sum -= static_cast<double>(visits) * (cycle + distance);
             // A draw backs up q = 0 and draw = 1 from every viewpoint.
             current.draw_sum -= static_cast<double>(visits);
             continue;
         }
-        // Proven nodes hold their exact value at the real visit count (backup_locked).
+        // A proven root holds its exact value at the real visit count (backup_locked), and keeps
+        // its mean moves left: as a proven node below an earlier root it may have replaced those
+        // samples by its own (Lc0 Node::MakeTerminal m_), and a mean stays unusable when
+        // incomplete.
         const auto count = static_cast<double>(current.visits);
         current.value_sum = current.proof.outcome == ProofOutcome::Win
                                 ? count
                                 : (current.proof.outcome == ProofOutcome::Loss ? -count : 0.0);
         current.draw_sum = current.proof.outcome == ProofOutcome::Draw ? count : 0.0;
+        const auto samples = current.moves_left_samples;
+        const auto mean =
+            samples == 0 ? 0.0 : current.moves_left_sum / static_cast<double>(samples);
+        current.moves_left_samples = samples - std::min(samples, visits);
+        current.moves_left_sum = mean * static_cast<double>(current.moves_left_samples);
     }
     terminal = Node{};
     return visits;

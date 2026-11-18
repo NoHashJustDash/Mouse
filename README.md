@@ -1,15 +1,16 @@
 # Mouse
 
-Mouse is a UCI chess engine with its own neural network, **M1.5**. It is written
+Mouse is a UCI chess engine with its own neural network, **M2.1**. It is written
 in C++20 and runs its network through ONNX Runtime and TensorRT on an NVIDIA GPU.
 It can also play Lc0-format networks such as T1-256x10-distilled-swa-2432500, on
 TensorRT, CUDA or the CPU.
 
 The search is the same kind of Monte Carlo tree search as lc0's, with its smart
 pruning and legacy time manager, implemented independently and checked against lc0
-itself. Five of its default values are Mouse's own, tuned for M1.5; see
+itself. Five of its default values are Mouse's own, tuned for Mouse's networks; see
 [docs/LC0_DEFAULTS.md](docs/LC0_DEFAULTS.md). The network, what it was trained on and
-its licence are described in [docs/NETWORK.md](docs/NETWORK.md).
+its licence are described in [docs/NETWORK.md](docs/NETWORK.md). Its architecture and
+the code that trains it are in [Mouse-MoE](https://github.com/NoHashJustDash/Mouse-MoE).
 
 Mouse was built with the help of AI coding assistants; see
 [Made with AI assistance](#made-with-ai-assistance) and [Credits](#credits).
@@ -17,30 +18,43 @@ Mouse was built with the help of AI coding assistants; see
 ## Strength
 
 All results are from one machine (GeForce RTX 5070, Ryzen 7 7800X3D), playing one game
-at a time with pondering off and Mouse at its default settings. Margins are 95%
-confidence intervals.
+at a time at 10+0.1 with pondering off, with UHO openings played once with each colour.
+Mouse runs at its default settings. Margins are 95% confidence intervals.
 
-Every match below is 600 games at 10+0.1, with UHO openings played once with each
-colour.
+Each match is an SPRT: it stops once it is confident that the first player is better
+(H1) or that it is not at least 5 Elo better (H0), with bounds [0, 5] and
+α = β = 0.05.
 
-**Against Mouse 1.0.0.** Mouse 1.1.0 playing M1.5 against the released Mouse 1.0.0
-playing Lc0's T1 network, each at its default settings: **+0.6 ± 14.4 Elo**
-(+148 −147 =305). The two releases are equally strong; 1.1.0 gets there with its own
-network.
+**Against lc0.** Mouse against lc0 v0.32.1 running Lc0's T1 network at lc0's default
+settings.
 
-**Against lc0.** Each release played lc0 v0.32.1 running T1 at lc0's default settings.
+| Mouse | Result | Games (+ − =) | Decision |
+|---|---|---|---|
+| 2.0.0 engine with M2.1 | **+33.1 ± 13.8 Elo** | 632 (+183 −123 =326) | H1, better |
+| 1.1.0 engine with M2.0 | −12.3 ± 9.9 Elo | 1,358 (+303 −351 =704) | H0 |
+| 1.1.0 with M1.5 | −44.1 ± 17.1 Elo | 412 | H0 |
 
-| Release | Mouse vs lc0 | Games (+ − =) |
-|---|---|---|
-| 1.0.0, T1 | −59.6 ± 12.3 Elo | +70 −172 =358 |
-| 1.1.0, M1.5 | −38.4 ± 15.1 Elo | +121 −187 =292 |
+Mouse 2.0.0 is the first release that beats lc0 with T1 on this machine. The result
+measures the engine and the network together: 2.0.0 changes both, and the two have not
+been measured separately against lc0. No game in that match was lost on time or ended
+by a crash or an illegal move.
 
-1.1.0 scored better against lc0 than 1.0.0 did, but the direct match above found no
-difference between the two releases, so this is not a measured gain in strength. Mouse
-is still weaker than lc0.
+The 1.1.0 release notes reported M1.5 at −38.4 ± 15.1 Elo against lc0 over a fixed 600
+games; the SPRT above is the same pairing.
 
-**Search speed.** On the same T1 network, Mouse 1.1.0 searched 1.35 times as many nodes
-per second as lc0 (geometric mean of five positions); 1.0.0 managed 0.89 times.
+**Against Mouse's earlier networks.** Both matches ran the 1.1.0 engine; only the
+network differed.
+
+| Network | Against | Result | Games (+ − =) | Decision |
+|---|---|---|---|---|
+| M2.1 | M2.0 | +31.9 ± 13.4 Elo | 634 (+186 −128 =320) | H1, better |
+| M2.0 | M1.5 | +27.2 ± 12.4 Elo | 844 (+235 −169 =440) | H1, better |
+
+**Search speed.** With M2.1, the 2.0.0 engine searched 22% more positions than the 1.1.0
+engine in the same time (five positions, 5 seconds each, run twice: 3.78 million against
+3.10 million in total). Its move generator is 5.5 times as fast (`perft 6` from the start
+position: 71.4 million against 13.0 million positions per second). Each figure is from
+one run on the machine above.
 
 ## Made with AI assistance
 
@@ -61,7 +75,7 @@ please report anything that looks wrong.
 Mouse is free software under the GNU General Public License, version 3 or later
 ([LICENSE](LICENSE)), with an additional permission to combine it with NVIDIA's CUDA,
 cuDNN and TensorRT libraries ([docs/NVIDIA_PERMISSION.md](docs/NVIDIA_PERMISSION.md)).
-The M1.5 network is under the same licence; its training-data notice is in
+The M2.1 network is under the same licence; its training-data notice is in
 [docs/NETWORK.md](docs/NETWORK.md). Vendored and bundled components keep their own
 licences, listed below and in `licenses/`.
 
@@ -75,7 +89,7 @@ licences, listed below and in `licenses/`.
   reference fixtures under `tests/data/nn/` were produced with lc0, and lc0 v0.32.1 is
   the engine Mouse is measured against. Lc0 is licensed under the GPL-3.0, like Mouse.
   Mouse is not affiliated with or endorsed by the Lc0 project.
-- The Lc0 project's networks and training data. M1.5 was trained on Lc0's open
+- The Lc0 project's networks and training data. M2.1 was trained on Lc0's open
   training data and distilled from Lc0's BT4 network
   (BT4-1024x15x32h-swa-6147500-policytune-332), which provided its training targets.
   Mouse can also play Lc0's T1 network. The data notice and the details are in
@@ -109,20 +123,49 @@ licences, listed below and in `licenses/`.
 
 ## Quick start (Windows x64, NVIDIA GPU)
 
-1. Install the NVIDIA driver, CUDA 12.8, cuDNN 9.8 and TensorRT 10.9
-   (versions and links in [docs/TOOLCHAIN.md](docs/TOOLCHAIN.md)).
-2. Unzip `mouse-1.1.0-windows-x64.zip`.
-3. Add `mouse.exe` to your chess GUI as a UCI engine. Set `WeightsFile` to the full path
-   of `M1.5.onnx` from the unzipped folder and `GpuDllDirectories` to your CUDA
-   `bin`, cuDNN `bin` and TensorRT `lib` folders, separated by semicolons.
+1. Install a current NVIDIA driver.
+2. Unzip `mouse-2.0.0-windows-x64.zip`.
+3. Get NVIDIA's libraries. In the unzipped folder, read the licences the script lists,
+   then run:
 
-The first start builds TensorRT engines for your GPU, which takes a few minutes;
-later starts take a few seconds. The build runs in a short-lived second `mouse.exe`
-process (`build-tensorrt-cache`) that needs several GB of free RAM while it works.
+   ```powershell
+   powershell -ExecutionPolicy Bypass -File setup-gpu.ps1 -AcceptNvidiaLicenses
+   ```
+
+   It downloads CUDA 12.8, cuDNN 9.8 and TensorRT 10.9 from NVIDIA's servers (about
+   3.1 GB, no NVIDIA account needed), checks them against the SHA-256 hashes in
+   `gpu-packages.json`, and puts the libraries in a `gpu` folder beside `mouse.exe`.
+   Nothing is installed system-wide; deleting the `gpu` folder undoes it.
+4. Check the setup: `mouse.exe doctor` lists what it found and anything still missing.
+5. Add `mouse.exe` to your chess GUI as a UCI engine and set `WeightsFile` to the full
+   path of `M2.1.onnx` from the unzipped folder.
+
+Mouse uses the `gpu` folder by itself when `GpuDllDirectories` is empty. If you already
+have CUDA 12.8, cuDNN 9.8 and TensorRT 10.9 installed
+([docs/TOOLCHAIN.md](docs/TOOLCHAIN.md)), skip step 3 and set `GpuDllDirectories` to
+your CUDA `bin`, cuDNN `bin` and TensorRT `lib` folders, separated by semicolons.
+
+The first start builds TensorRT engines for your GPU. This takes about seven minutes
+on an RTX 5070 (438 seconds measured); later starts take about 11 seconds. Let the
+first start finish before the first game. The build runs in a short-lived second
+`mouse.exe` process (`build-tensorrt-cache`) that needs several GB of free RAM while it
+works.
 The NVIDIA libraries are not included in the download.
 
-M1.5 needs TensorRT and the `mouse_moe_trt.dll` plugin beside `mouse.exe`. It does
-not run on the CPU or CUDA backends: Mouse stops with an error instead of switching.
+The `M2.1.onnx` in this download needs TensorRT and the `mouse_moe_trt.dll` plugin beside
+`mouse.exe`. It does not run on the CPU or CUDA backends: Mouse stops with an error
+instead of switching.
+
+## AMD or Intel GPU, or no GPU
+
+Mouse has a DirectML build that runs on any DirectX 12 GPU. It is slower than the NVIDIA
+build: about 3.8 times on an RTX 5070, and unmeasured on AMD and Intel cards. Mouse 2.0.0
+has no download for it. One is planned for 2.0.1, together with the M2.1 exports it
+needs, because the M2.1 file in the NVIDIA download runs only on TensorRT. Until then the
+build can be made from source with the `windows-dml` preset and plays Lc0 networks such
+as T1; see [docs/DIRECTML.md](docs/DIRECTML.md).
+
+## Playing the T1 network
 
 To play the T1 network instead, on any backend, download and convert it (needs
 Python 3.12). From the unzipped folder:
@@ -135,7 +178,7 @@ py -3.12 -m venv .venv
 ```
 
 The download checks the file's size and SHA-256 before converting it. Mouse's default
-search values were tuned for M1.5, so T1 may play better with
+search values were tuned for Mouse's own networks, so T1 may play better with
 [lc0's values](docs/LC0_DEFAULTS.md).
 
 ## Windows build
@@ -223,16 +266,16 @@ create a GPU model after installing the locked converter environment:
 Use the actual SDK directories from your installation. All three explicit GPU
 directories and the ONNX model must be valid. The engine reports errors instead
 of selecting another model, precision or provider. TensorRT builds its disk cache
-on first load; allow up to five minutes for initial readiness in a GUI or runner.
+on first load; allow up to ten minutes for initial readiness in a GUI or runner.
 It reports cold-build progress as `info string` messages. Engines are built by a
 child `mouse.exe build-tensorrt-cache` process, which exits when the cache is
 committed; the engine then loads it. Changing a backend option such as `WeightsFile`
 or `MinibatchSize` builds a new cache if needed; the engines it replaces stay in GPU
 memory until the engine exits, because ORT 1.22's TensorRT provider cannot release a
 session safely. On the RTX 5070 with
-ORT 1.22.0, TensorRT 10.9 and T1 FP16, a fresh cache took 119.39 seconds; the
-verified warm EPContext cache reached `readyok` in 4.19 seconds. These measured
-times depend on hardware and system load. Cache identity changes require a new
+ORT 1.22.0, TensorRT 10.9 and M2.1, a fresh cache took 438.6 seconds at the default
+`MinibatchSize`, which builds eight engines; the warm cache reached `readyok` in
+11.3 seconds. These measured times depend on hardware and system load. Cache identity changes require a new
 cold build. Keep `context.onnx`, engine and timing payloads together in their
 cache namespace; missing or altered files fail explicitly. The model path is
 still required and validated on every load. A first `go` includes any remaining
@@ -409,8 +452,10 @@ for the full capacity. Set a smaller count to bound retained evaluations or 0
 to disable the cache. Each entry stores only the legal-move float32 logits,
 WDL and optional moves-left value. Temperature is applied later.
 
-A 128-bit fingerprint covers the model/provider namespace, every encoded input
-bit and the ordered legal policy indices. Fingerprints replace complete input
+A 128-bit fingerprint covers the model/provider namespace, the encoded input
+and the ordered legal policy indices. At the default `CacheHistoryLength` of 0 the
+50-move counter is left out, as in lc0, so the same position at another count is a
+hit and returns the evaluation stored for the first count. Fingerprints replace complete input
 storage; a hash collision is possible. Allocation
 failure is reported explicitly, without reducing capacity or switching providers.
 Hits and updates of existing entries allocate nothing; inserting new entries may
@@ -443,7 +488,8 @@ See the [contribution guide](CONTRIBUTING.md).
 Gather and NN-wait durations can overlap provider work; backup includes cached
 and terminal evaluations. `gpu_idle_ms` is wall time minus synchronous provider
 call time (`idle_basis host_provider_gaps`), not a CUDA kernel timestamp measurement.
-GPU backends pad to the next configured batch bucket. TensorRT uses a separate
+GPU backends pad to the next configured batch bucket. The buckets are 1, 8, up to
+five geometric steps and the maximum, so at most eight. TensorRT uses a separate
 fixed-shape session and CUDA graph for each bucket, with persistent device IO
 and pinned host staging buffers. Changing the backend layout creates a new
 verified engine-cache namespace; cold construction builds every bucket.

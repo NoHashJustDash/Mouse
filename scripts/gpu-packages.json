@@ -1,0 +1,70 @@
+{
+  "schema": 1,
+  "licenses": [
+    { "name": "NVIDIA CUDA Toolkit licence", "url": "https://docs.nvidia.com/cuda/eula/index.html" },
+    { "name": "NVIDIA cuDNN licence", "url": "https://docs.nvidia.com/deeplearning/cudnn/latest/reference/eula.html" },
+    { "name": "NVIDIA TensorRT licence", "url": "https://docs.nvidia.com/deeplearning/tensorrt/latest/reference/sla.html" }
+  ],
+  "packages": [
+    {
+      "name": "CUDA runtime 12.8.90",
+      "url": "https://developer.download.nvidia.com/compute/cuda/redist/cuda_cudart/windows-x86_64/cuda_cudart-windows-x86_64-12.8.90-archive.zip",
+      "archive": "cuda_cudart-windows-x86_64-12.8.90-archive.zip",
+      "size": 3037735,
+      "sha256": "4a39058fd8519444a81cfc7ae055d136f48d1a31ffa41ae255b35b2edd61e13b",
+      "files": [
+        { "entry": "cuda_cudart-windows-x86_64-12.8.90-archive/bin/cudart64_12.dll" }
+      ]
+    },
+    {
+      "name": "cuBLAS 12.8.4.1",
+      "url": "https://developer.download.nvidia.com/compute/cuda/redist/libcublas/windows-x86_64/libcublas-windows-x86_64-12.8.4.1-archive.zip",
+      "archive": "libcublas-windows-x86_64-12.8.4.1-archive.zip",
+      "size": 563660944,
+      "sha256": "57a470112cec7e112c95253dde8b3c7184d795dbd92b0bde77a4cb7f8c94c8aa",
+      "files": [
+        { "entry": "libcublas-windows-x86_64-12.8.4.1-archive/bin/cublas64_12.dll" },
+        { "entry": "libcublas-windows-x86_64-12.8.4.1-archive/bin/cublasLt64_12.dll" }
+      ]
+    },
+    {
+      "name": "cuFFT 11.3.3.83",
+      "url": "https://developer.download.nvidia.com/compute/cuda/redist/libcufft/windows-x86_64/libcufft-windows-x86_64-11.3.3.83-archive.zip",
+      "archive": "libcufft-windows-x86_64-11.3.3.83-archive.zip",
+      "size": 190568498,
+      "sha256": "cc6e0ba958cf23387b462017a24464c72bd901549046133f3d1ebcc3d7444c90",
+      "files": [
+        { "entry": "libcufft-windows-x86_64-11.3.3.83-archive/bin/cufft64_11.dll" }
+      ]
+    },
+    {
+      "name": "cuDNN 9.8.0.87",
+      "url": "https://developer.download.nvidia.com/compute/cudnn/redist/cudnn/windows-x86_64/cudnn-windows-x86_64-9.8.0.87_cuda12-archive.zip",
+      "archive": "cudnn-windows-x86_64-9.8.0.87_cuda12-archive.zip",
+      "size": 675349654,
+      "sha256": "d8a23705e3884b137b7e05449fb2b61bfa524e7cfc3fda80743d633f423c6ce4",
+      "files": [
+        { "entry": "cudnn-windows-x86_64-9.8.0.87_cuda12-archive/bin/cudnn64_9.dll" },
+        { "entry": "cudnn-windows-x86_64-9.8.0.87_cuda12-archive/bin/cudnn_adv64_9.dll" },
+        { "entry": "cudnn-windows-x86_64-9.8.0.87_cuda12-archive/bin/cudnn_cnn64_9.dll" },
+        { "entry": "cudnn-windows-x86_64-9.8.0.87_cuda12-archive/bin/cudnn_engines_precompiled64_9.dll" },
+        { "entry": "cudnn-windows-x86_64-9.8.0.87_cuda12-archive/bin/cudnn_engines_runtime_compiled64_9.dll" },
+        { "entry": "cudnn-windows-x86_64-9.8.0.87_cuda12-archive/bin/cudnn_graph64_9.dll" },
+        { "entry": "cudnn-windows-x86_64-9.8.0.87_cuda12-archive/bin/cudnn_heuristic64_9.dll" },
+        { "entry": "cudnn-windows-x86_64-9.8.0.87_cuda12-archive/bin/cudnn_ops64_9.dll" }
+      ]
+    },
+    {
+      "name": "TensorRT 10.9.0.34",
+      "url": "https://developer.download.nvidia.com/compute/machine-learning/tensorrt/10.9.0/zip/TensorRT-10.9.0.34.Windows.win10.cuda-12.8.zip",
+      "archive": "TensorRT-10.9.0.34.Windows.win10.cuda-12.8.zip",
+      "size": 1845842538,
+      "files": [
+        { "entry": "TensorRT-10.9.0.34/lib/nvinfer_10.dll", "sha256": "55c7ec9272a4b74830d3caaae9106f277fc7df37690067f69fe1fdfd1dbc52ff" },
+        { "entry": "TensorRT-10.9.0.34/lib/nvinfer_builder_resource_10.dll", "sha256": "2b8496c57a8434534e8a3c56e732207f1c74bc37ce7300d8f0d3542cdff02e12" },
+        { "entry": "TensorRT-10.9.0.34/lib/nvinfer_plugin_10.dll", "sha256": "420aee53c0c2b4b35e76335daba57e0cabd7e22f2b946e47ed77dfb3019ca5a9" },
+        { "entry": "TensorRT-10.9.0.34/lib/nvonnxparser_10.dll", "sha256": "d4ca07f3f392f6f39f1738ed5e615910448d1f98b657551a01c7575881584a2a" }
+      ]
+    }
+  ]
+}

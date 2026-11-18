@@ -89,11 +89,15 @@ Result<std::size_t> LegalCache::capacity_for_budget(CacheByteBudget request) {
 }
 Result<std::unique_ptr<LegalCache>> LegalCache::create(std::size_t entries,
                                                        std::string_view identity,
-                                                       std::size_t history_length) {
+                                                       std::size_t history_length,
+                                                       LegalCacheOptions options) {
     if (identity.empty())
         return tl::unexpected(std::string{"Legal cache identity must be nonempty"});
     if (history_length > kFullCacheHistory)
         return tl::unexpected(std::string{"Legal cache history length must be 0..7"});
+    if (history_length == kFullCacheHistory && !options.key_rule50)
+        return tl::unexpected(
+            std::string{"Legal cache full history keys every input bit, including rule 50"});
     const auto budget = budget_for_entries(entries, identity.size());
     if (!budget) return tl::unexpected(budget.error());
     try {
@@ -101,11 +105,20 @@ Result<std::unique_ptr<LegalCache>> LegalCache::create(std::size_t entries,
                                                   *budget == 0 ? 0 : *budget - sizeof(LegalCache));
         cache->stats_.budget_bytes = *budget;
         cache->history_length_ = history_length;
+        cache->options_ = options;
         if (entries == 0) return cache;
         auto& data = cache->storage_.emplace(&cache->memory_);
         data.identity.assign(identity);
         cache->namespace_ = hash128(std::as_bytes(std::span{identity}));
         cache->stats_.capacity = entries;
+        if (options.reserve_index) {
+            // insert() adds the new key before evicting the LRU victim, so the
+            // index briefly holds capacity + 1 keys. budget_for_entries charges
+            // kIndexReserve per entry plus one spare entry, which covers the
+            // bucket array (at most a few machine words per key on MSVC and
+            // libstdc++) and the per-insert nodes.
+            data.index.reserve(entries + 1);
+        }
         return cache;
     } catch (const std::bad_alloc&) {
         return tl::unexpected(std::string{"NN cache OOM"});
@@ -116,11 +129,18 @@ Result<std::unique_ptr<LegalCache>> LegalCache::create(std::size_t entries,
 bool LegalCache::matches_identity(std::string_view identity) const noexcept {
     return storage_ && std::ranges::equal(storage_->identity, identity);
 }
+std::size_t LegalCache::index_bucket_count() const {
+    const std::lock_guard lock(mutex_);
+    return storage_ ? storage_->index.bucket_count() : 0;
+}
 Hash128 LegalCache::hash(const InputPlanes& input, const PolicyIndices& policy) const noexcept {
     // Canonical little-endian serialization: no struct padding, lost empty-plane
     // values or signed-zero canonicalization. Namespace and index order matter.
     constexpr auto bytes = 16 + 112 * 12 + 8 + 2 * chess::MoveList::kCapacity;
-    std::array<std::byte, bytes> key{};
+    // Left uninitialized: append() writes the key contiguously from byte 0 and
+    // only the written prefix first(used) is hashed, so zeroing it is wasted work.
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
+    std::array<std::byte, bytes> key;
     std::size_t used = 0;
     // The low `count` bytes of `value`, least significant first: on a little-endian
     // host that is its first `count` bytes in memory. The size above bounds `used`.
@@ -133,10 +153,13 @@ Hash128 LegalCache::hash(const InputPlanes& input, const PolicyIndices& policy) 
     for (const auto word : namespace_) append(word, 8);
     // Classical 112-plane layout: 8 frames of 13 planes (current first), then
     // 8 auxiliary planes (castling, side to move, rule50, constant planes).
-    constexpr std::size_t kFramePlanes = 13, kAuxiliaryBegin = 104;
+    // encoder.cpp encode_classical writes rule 50 as plane 109's value. Lc0
+    // v0.32.1 neural/memcache.cc leaves rule 50 out of its key; see the header.
+    constexpr std::size_t kFramePlanes = 13, kAuxiliaryBegin = 104, kRule50Plane = 109;
     const auto keyed_frames = kFramePlanes * (history_length_ + 1);
     for (std::size_t index = 0; index < input.size(); ++index) {
         if (index >= keyed_frames && index < kAuxiliaryBegin) continue;
+        if (index == kRule50Plane && !options_.key_rule50) continue;
         append(input.at(index).mask, 8);
         append(std::bit_cast<std::uint32_t>(input.at(index).value), 4);
     }

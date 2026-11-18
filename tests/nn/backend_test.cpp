@@ -1210,3 +1210,50 @@ TEST_CASE("Policy validation rejects a non-finite logit at any index", "[nn][out
     extreme.policy_logits.at(1) = std::numeric_limits<float>::denorm_min();
     CHECK(mouse::nn::validate_nn_output(extreme));
 }
+
+namespace {
+// After a full batch fills every pooled row, smaller batches (padded to a larger bucket on
+// GPU) must return exactly their own current rows and leave caller rows past them untouched.
+void check_shrinking_batches(mouse::nn::Backend& backend) {
+    std::array<InputPlanes, 8> inputs{};
+    for (std::size_t row = 0; row < inputs.size(); ++row)
+        inputs.at(row) = input(static_cast<float>(row) * 0.125F - 0.5F);
+    std::array<NNOutput, 8> outputs{};
+    REQUIRE(backend.evaluate(inputs, outputs));
+    for (std::size_t row = 0; row < inputs.size(); ++row)
+        check_row(outputs.at(row), inputs.at(row)[0].value);
+    for (const std::size_t batch :
+         {std::size_t{3}, std::size_t{1}, std::size_t{5}, std::size_t{2}, std::size_t{7}}) {
+        INFO("batch " << batch);
+        for (std::size_t row = 0; row < batch; ++row)
+            inputs.at(row) = input(0.75F - static_cast<float>(row + batch) * 0.0625F);
+        reset_failure_sentinels(outputs);
+        const auto untouched = output_bytes(std::span{outputs}.subspan(batch));
+        REQUIRE(backend.evaluate(std::span{inputs}.first(batch), std::span{outputs}.first(batch)));
+        for (std::size_t row = 0; row < batch; ++row)
+            check_row(outputs.at(row), inputs.at(row)[0].value);
+        CHECK(output_bytes(std::span{outputs}.subspan(batch)) == untouched);
+    }
+}
+}  // namespace
+
+TEST_CASE("Smaller CPU batches after a full batch publish exactly their own rows",
+          "[nn][backend]") {
+    const auto created = mouse::nn::create_backend(cpu_config());
+    if (!created) FAIL(created.error());
+    check_shrinking_batches(**created);
+}
+
+TEST_CASE("CUDA batches padded to a bucket publish exactly their own logical rows",
+          "[nn][backend-gpu][gpu]") {
+    auto config = cpu_config();
+    config.kind = BackendKind::Cuda;
+    config.precision = ComputePrecision::Float32;
+    config.gpu_dll_directories = configured_gpu_directories();
+    const EmptyPath sanitized;
+    const auto created = mouse::nn::create_backend(config);
+    if (!created) FAIL(created.error());
+    CHECK((*created)->physical_batch_size(3) == 4);
+    CHECK((*created)->physical_batch_size(7) == 8);
+    check_shrinking_batches(**created);
+}

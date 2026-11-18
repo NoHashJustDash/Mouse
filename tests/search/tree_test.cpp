@@ -5,6 +5,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <cstddef>
 #include <cstdint>
+#include <initializer_list>
 #include <limits>
 #include <memory>
 #include <stdexcept>
@@ -156,6 +157,63 @@ TEST_CASE("Tree expansion validates the complete seed block before publishing", 
     const auto expanded = snapshot(*tree);
     CHECK_FALSE(tree->expand(0, valid));
     check_snapshot(*tree, expanded);
+}
+
+TEST_CASE("Tree expansion keeps moves that differ only in promotion or kind", "[search][tree]") {
+    using mouse::chess::MoveKind;
+    using mouse::chess::PieceType;
+    // e7e8 with each promotion piece, as a pawn on the seventh rank produces them, then the
+    // same squares as an en passant move: five distinct moves on one from/to pair.
+    const mouse::chess::Square e7 = 52, e8 = 60;
+    const std::array seeds{
+        EdgeSeed{.move = Move{e7, e8, PieceType::Queen}, .prior_bits = 0x3800},
+        EdgeSeed{.move = Move{e7, e8, PieceType::Rook}, .prior_bits = 0x3800},
+        EdgeSeed{.move = Move{e7, e8, PieceType::Bishop}, .prior_bits = 0x3800},
+        EdgeSeed{.move = Move{e7, e8, PieceType::Knight}, .prior_bits = 0x3800},
+        EdgeSeed{.move = Move{e7, e8, PieceType::None, MoveKind::EnPassant}, .prior_bits = 0x3800}};
+    auto tree = make_tree();
+    REQUIRE(tree->expand(0, seeds));
+    REQUIRE(tree->edges(0).size() == 5);
+    for (std::size_t index = 0; index < seeds.size(); ++index)
+        CHECK(tree->edges(0)[index].move == seeds.at(index).move);
+}
+
+TEST_CASE("Tree expansion keeps moves that share only their origin or only their target",
+          "[search][tree]") {
+    // Every move from a1 and every move to a1: 126 distinct moves.
+    std::vector<EdgeSeed> seeds;
+    for (mouse::chess::Square other = 1; other < 64; ++other) {
+        seeds.push_back({.move = Move{0, other}, .prior_bits = 0x3800});
+        seeds.push_back({.move = Move{other, 0}, .prior_bits = 0x3800});
+    }
+    auto tree = make_tree();
+    REQUIRE(tree->expand(0, seeds));
+    REQUIRE(tree->edges(0).size() == 126);
+    for (std::size_t index = 0; index < seeds.size(); ++index)
+        CHECK(tree->edges(0)[index].move == seeds.at(index).move);
+}
+
+TEST_CASE("Tree expansion rejects a repeated move wherever its twin sits", "[search][tree]") {
+    using mouse::chess::PieceType;
+    auto tree = make_tree();
+    const auto before = snapshot(*tree);
+    // 40 distinct moves, then a repeat of the first, of a middle one and of the last.
+    for (const unsigned int twin : {0U, 17U, 39U}) {
+        std::vector<EdgeSeed> seeds;
+        for (unsigned int tag = 0; tag < 40; ++tag) seeds.push_back(seed(tag));
+        seeds.push_back(seed(twin));
+        CHECK_FALSE(tree->expand(0, seeds));
+        check_snapshot(*tree, before);
+    }
+    // A repeated promotion among other promotions on the same squares.
+    const mouse::chess::Square e7 = 52, e8 = 60;
+    const std::array promotions{
+        EdgeSeed{.move = Move{e7, e8, PieceType::Queen}, .prior_bits = 0x3800},
+        EdgeSeed{.move = Move{e7, e8, PieceType::Rook}, .prior_bits = 0x3800},
+        EdgeSeed{.move = Move{e7, e8, PieceType::Knight}, .prior_bits = 0x3800},
+        EdgeSeed{.move = Move{e7, e8, PieceType::Rook}, .prior_bits = 0x3800}};
+    CHECK_FALSE(tree->expand(0, promotions));
+    check_snapshot(*tree, before);
 }
 
 TEST_CASE("Tree edge exhaustion does not partially expand a node", "[search][tree]") {

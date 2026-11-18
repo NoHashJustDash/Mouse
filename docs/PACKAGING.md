@@ -18,7 +18,13 @@ the Windows x64 ZIP, corresponding-source ZIP, SHA256SUMS, and manifest.json.
 Source snapshots, configuration, built and installed binaries remain hash-bound
 through publication. Existing output is immutable. This validates artifacts,
 not chess strength or tournament release gates; `release_gate` remains false.
-Pass `--net <file>` to ship a network in the binary ZIP as `M1.5.onnx`; it stays out of
+A DirectML build (preset `windows-dml`) is packaged the same way. The packager reads
+`MOUSE_ORT_DIRECTML_BUILD` from the CMake cache, requires that build's own runtime files
+and licences, and names the ZIP `mouse-<version>-windows-x64-directml.zip`. It ships no
+NVIDIA files, and its networks must be plugin-free exports: `--net` takes the FP32 export
+(`M2.1.onnx`) and `--net-fp16` the FP16 export (`M2.1-fp16.onnx`).
+
+Pass `--net <file>` to ship a network in the binary ZIP as `M2.1.onnx`; it stays out of
 the source ZIP. A network that uses the Mouse-MoE plugin needs a build configured with
 `MOUSE_TRT_MOE_PLUGIN=ON` (preset `windows-moe`), which adds the plugin and its licence to
 the install. No NVIDIA runtime DLLs are included. Four Microsoft ONNX Runtime DLLs are

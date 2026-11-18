@@ -121,6 +121,8 @@ def fixture(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Path, dict
         "LICENSE": b"GNU GENERAL PUBLIC LICENSE\nVersion 3, 29 June 2007\n",
         "README.md": b"Mouse candidate; use mouse uci --weights net.onnx\n",
         "CHANGELOG.md": b"# Changelog\n0.5.0-dev\n",
+        "setup-gpu.ps1": b"# SPDX-License-Identifier: GPL-3.0-or-later\n",
+        "gpu-packages.json": b'{"schema": 1, "licenses": [], "packages": []}\n',
         "licenses/ONNXRuntime-LICENSE": b"MIT License\nCopyright Microsoft Corporation\n",
         "licenses/ThirdPartyNotices.txt": b"ONNX Runtime third party notices\n",
         "licenses/tl-expected-LICENSE": b"CC0 1.0 Universal\n",
@@ -197,7 +199,7 @@ def test_exact_clean_plan_binds_stage_source_and_support_without_checkout_scan(
     assert plan.interpreter_alias == Path(sys.executable).absolute()
     assert plan.interpreter_target == interpreter
     assert plan.version == "0.5.0-dev"
-    assert len(plan.stage_hashes) == 11
+    assert len(plan.stage_hashes) == 13
 
 
 @pytest.mark.parametrize(
@@ -823,3 +825,14 @@ def test_plugin_builds_require_exactly_the_plugin_and_cutlass_license(tmp_path: 
     (plugin / "licenses" / "CUTLASS-LICENSE").unlink()
     with pytest.raises(m.PackageError):
         m.stage_inventory(plugin, True)
+
+
+def test_the_stage_ships_the_gpu_setup_script_and_its_package_list(tmp_path: Path) -> None:
+    m = api()
+    assert {"setup-gpu.ps1", "gpu-packages.json"} == set(m.SETUP_FILES)
+    assert m.SETUP_FILES <= m.STAGE_FILES
+    # A stage without them is not a release payload.
+    stage = tmp_path / "stage"
+    _stage(stage, set(m.STAGE_FILES) - {"setup-gpu.ps1"})
+    with pytest.raises(m.PackageError):
+        m.stage_inventory(stage)

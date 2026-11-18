@@ -51,27 +51,31 @@ Result<void> LegalEvaluator::evaluate(std::span<const InputPlanes> inputs,
     const std::lock_guard lock(mutex_);
     std::size_t count = 0;
     for (std::size_t row = 0; row < inputs.size(); ++row) {
+        if (!cache_) {
+            // Cache-off preserves the original physical batch cardinality and order.
+            misses_.at(row) = count;
+            ++count;
+            continue;
+        }
         misses_.at(row) = kHit;
-        if (cache_) {
-            auto found = cache_->lookup(inputs[row], policy[row]);
-            if (!found) return tl::unexpected(found.error());
-            const auto& cached = *found;
-            if (cached.has_value()) {
-                staged_.at(row) = cached.value();
-                continue;
-            }
+        auto found = cache_->lookup(inputs[row], policy[row]);
+        if (!found) return tl::unexpected(found.error());
+        const auto& cached = *found;
+        if (cached.has_value()) {
+            staged_.at(row) = cached.value();
+            continue;
         }
         std::size_t index = 0;
-        if (cache_)
-            while (index < count && !same(inputs_.at(index), inputs[row])) ++index;
-        else
-            index = count;  // Cache-off preserves original physical batch cardinality.
+        while (index < count && !same(inputs_.at(index), inputs[row])) ++index;
         if (index == count) {
             inputs_.at(count) = inputs[row];
             ++count;
         }
         misses_.at(row) = index;
     }
+    // Cache-off submits every caller row unchanged and in order, so the backend reads the
+    // caller's rows directly instead of a copy; the caller keeps them unchanged meanwhile.
+    const auto submitted = cache_ ? std::span<const InputPlanes>{inputs_}.first(count) : inputs;
     if (count != 0) {
         for (std::size_t i = 0; i < count; ++i) {
             outputs_.at(i).policy_logits.fill(std::numeric_limits<float>::quiet_NaN());
@@ -80,8 +84,7 @@ Result<void> LegalEvaluator::evaluate(std::span<const InputPlanes> inputs,
         }
         const auto began =
             timing ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point{};
-        auto evaluated =
-            backend_.evaluate(std::span{inputs_}.first(count), std::span{outputs_}.first(count));
+        auto evaluated = backend_.evaluate(submitted, std::span{outputs_}.first(count));
         if (timing) {
             timing->positions = backend_.physical_batch_size(count);
             timing->provider = std::chrono::steady_clock::now() - began;

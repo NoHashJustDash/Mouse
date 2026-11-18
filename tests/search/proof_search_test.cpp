@@ -3,8 +3,12 @@
 #include <array>
 #include <bit>
 #include <catch2/catch_test_macros.hpp>
+#include <cmath>
+#include <cstdint>
+#include <span>
 #include <stdexcept>
 #include <string_view>
+#include <utility>
 
 #include "engine/chess/attacks.h"
 #include "engine/chess/movegen.h"
@@ -65,6 +69,19 @@ mouse::chess::Position position(std::string_view fen, const mouse::chess::Attack
     if (!root) throw std::runtime_error(root.error());
     return std::move(*root);
 }
+mouse::search::SearchConfig proof_config(bool enabled = true, std::size_t depth = 32) {
+    mouse::search::SearchConfig config;
+    config.threads = 1;
+    config.maximum_batch = 4;
+    config.max_depth = depth;
+    config.ram_limit_bytes = 8U << 20U;
+    config.deterministic = true;
+    config.terminal_proof = enabled;
+    // The recorded digests and visit expectations used Lc0's search parameters.
+    config.selection = mouse::test::kLc0Selection;
+    config.draw_rate = mouse::test::kLc0DrawRate;
+    return config;
+}
 struct Fixture {
     const mouse::chess::AttackTables attacks;
     UniformBackend backend;
@@ -73,18 +90,10 @@ struct Fixture {
     std::unique_ptr<mouse::search::SearchEngine> engine;
     explicit Fixture(std::string_view fen = mouse::chess::kStartFen, bool enabled = true,
                      std::size_t depth = 32)
+        : Fixture(fen, proof_config(enabled, depth)) {}
+    Fixture(std::string_view fen, const mouse::search::SearchConfig& config)
         : root(position(fen, attacks)) {
         history.reset(root);
-        mouse::search::SearchConfig config;
-        config.threads = 1;
-        config.maximum_batch = 4;
-        config.max_depth = depth;
-        config.ram_limit_bytes = 8U << 20U;
-        config.deterministic = true;
-        config.terminal_proof = enabled;
-        // The recorded digests and visit expectations used Lc0's search parameters.
-        config.selection = mouse::test::kLc0Selection;
-        config.draw_rate = mouse::test::kLc0DrawRate;
         auto created = mouse::search::SearchEngine::create(config, attacks, backend);
         if (!created) throw std::runtime_error(created.error());
         engine = std::move(*created);
@@ -465,4 +474,168 @@ TEST_CASE("Parallel gather reuses unchanged PUCT terms with a deterministic trac
     CHECK(digest == 8352298212493842131ULL);
     CHECK(result->info.nodes == 3000);
     CHECK(result->stats.selection_hits > 0);
+}
+
+namespace {
+// Black's only move lets white mate in one.
+constexpr std::string_view kForcedLoss = "7k/8/5K2/6Q1/8/8/8/8 b - - 0 1";
+// Black to move; only Kh8 walks into Ra8#.
+constexpr std::string_view kBackRank = "6k1/5ppp/8/8/8/8/5PPP/R5K1 b - - 0 1";
+std::uint64_t child_visits(const mouse::search::SearchEngine& engine) {
+    std::uint64_t total = 0;
+    const auto roots = engine.root_moves();
+    for (const auto& row : std::span{roots.moves}.first(roots.size)) total += row.visits;
+    return total;
+}
+// Searches in steps until a root move is proven a win for the opponent. With uniform priors the
+// mating reply waits behind its siblings, so the visit count it needs is found, not assumed.
+template <typename FixtureType>
+mouse::search::SearchResult run_until_refuted(FixtureType& fixture) {
+    for (std::uint64_t nodes = 256; nodes <= 32768; nodes += 256) {
+        auto result = fixture.run(nodes);
+        const auto roots = fixture.engine->root_moves();
+        if (std::ranges::any_of(std::span{roots.moves}.first(roots.size), [](const auto& row) {
+                return row.child_proof.outcome == Win && row.visits > 1;
+            })) {
+            return result;
+        }
+    }
+    throw std::runtime_error("no root move was refuted within 32768 visits");
+}
+}  // namespace
+
+TEST_CASE("A proven node below the root takes visits without network evaluations",
+          "[search][proof][proof-terminal]") {
+    // Lc0 v0.32.1 classic/search.cc MaybeSetBounds makes the node terminal and
+    // PickNodesToExtendTask never descends into a terminal node.
+    // A wide exploration term keeps the old mode revisiting the lost siblings of the mate, each a
+    // network row, where a narrow one would let the mate absorb every visit in both modes.
+    auto stopping = proof_config();
+    stopping.selection.cpuct = 10.0;
+    auto descending = stopping;
+    descending.proof_stops_descent = false;
+    Fixture terminal{kForcedLoss, stopping}, searched{kForcedLoss, descending};
+    REQUIRE(terminal.run(128).info.proof.outcome == Loss);
+    REQUIRE(searched.run(128).info.proof.outcome == Loss);
+    const auto terminal_rows = terminal.backend.rows, searched_rows = searched.backend.rows;
+    const auto a = terminal.run(1024), b = searched.run(1024);
+    CHECK(a.info.nodes == 1024);
+    CHECK(b.info.nodes == 1024);
+    CHECK(terminal.backend.rows == terminal_rows);
+    CHECK(searched.backend.rows > searched_rows);
+    CHECK(a.info.q == -1);
+    CHECK(a.info.proof == b.info.proof);
+    const auto roots = terminal.engine->root_moves();
+    REQUIRE(roots.size == 1);
+    CHECK(roots.moves[0].visits == 1023);
+    // Lc0 NodeTree::MakeMove and Node::MakeNotTerminal: as the root, the proven child is searched
+    // again and counts one own visit plus its children's.
+    REQUIRE(terminal.engine->advance(roots.moves[0].move));
+    const auto before = terminal.engine->snapshot();
+    CHECK(before.proof.outcome == Win);
+    CHECK(before.q == 1);
+    CHECK(before.nodes < 1023);
+    CHECK(child_visits(*terminal.engine) + 1 == before.nodes);
+    const auto next = terminal.run(before.nodes + 64);
+    CHECK(next.info.inherited_visits == before.nodes);
+    CHECK(next.info.new_playouts == 64);
+    CHECK(next.info.q == 1);
+    CHECK(child_visits(*terminal.engine) + 1 == next.info.nodes);
+}
+
+TEST_CASE("A move into a position the opponent has won loses its prior",
+          "[search][proof][proof-terminal]") {
+    // Lc0 v0.32.1 classic/node.cc Node::MakeTerminal clears the policy of a move whose result is
+    // a loss for the side that played it.
+    auto kept = proof_config();
+    kept.proof_zeroes_losing_prior = false;
+    Fixture cleared{kBackRank, proof_config()}, original{kBackRank, kept};
+    auto probe = cleared.root;
+    const auto blunder = mouse::chess::parse_uci_move(probe, "g8h8", cleared.attacks);
+    REQUIRE(blunder);
+    static_cast<void>(run_until_refuted(cleared));
+    static_cast<void>(run_until_refuted(original));
+    const auto check = [&](const Fixture& fixture, bool zeroed) {
+        const auto roots = fixture.engine->root_moves();
+        bool found = false;
+        for (const auto& row : std::span{roots.moves}.first(roots.size)) {
+            if (row.move == *blunder) {
+                found = true;
+                CHECK(row.child_proof.outcome == Win);
+                CHECK(row.child_proof.mate_upper_bound == 1);
+            }
+            if (row.child_proof.outcome == Win) {
+                CHECK((row.prior == 0.0F) == zeroed);
+            } else {
+                CHECK(row.prior > 0.0F);
+            }
+        }
+        CHECK(found);
+    };
+    check(cleared, true);
+    check(original, false);
+}
+
+TEST_CASE("A newly proven node corrects what its ancestors already received from it",
+          "[search][proof][proof-terminal]") {
+    // Lc0 v0.32.1 classic/search.cc DoBackupUpdateSingleNode n_to_fix and classic/node.cc
+    // Node::AdjustForTerminal: an unproven root holds its own sample plus exactly what its
+    // children hold, including a child proven after its first visits.
+    Fixture single{kBackRank};
+    const auto own = single.run(1).info;
+    auto stale = proof_config();
+    stale.proof_adjusts_ancestors = false;
+    Fixture adjusted{kBackRank, proof_config()}, unadjusted{kBackRank, stale};
+    const auto residual = [](const Fixture& fixture, const mouse::search::SearchInfo& info) {
+        auto q = info.q * static_cast<double>(info.nodes);
+        auto draw = info.draw * static_cast<double>(info.nodes);
+        const auto roots = fixture.engine->root_moves();
+        for (const auto& row : std::span{roots.moves}.first(roots.size)) {
+            q -= row.q * static_cast<double>(row.visits);
+            draw -= row.draw * static_cast<double>(row.visits);
+        }
+        return std::pair{q, draw};
+    };
+    const auto a = run_until_refuted(adjusted), b = run_until_refuted(unadjusted);
+    REQUIRE(a.info.proof.outcome == Unknown);
+    REQUIRE(b.info.proof.outcome == Unknown);
+    for (const auto* fixture : {&adjusted, &unadjusted}) {
+        const auto roots = fixture->engine->root_moves();
+        REQUIRE(std::ranges::any_of(std::span{roots.moves}.first(roots.size), [](const auto& row) {
+            return row.child_proof.outcome == Win && row.visits > 1;
+        }));
+    }
+    const auto [q, draw] = residual(adjusted, a.info);
+    CHECK(std::abs(q - own.q) < 1e-9);
+    CHECK(std::abs(draw - own.draw) < 1e-9);
+    const auto [stale_q, stale_draw] = residual(unadjusted, b.info);
+    CHECK(std::abs(stale_q - own.q) > 0.1);
+    CHECK(std::abs(stale_draw - own.draw) > 0.01);
+}
+
+TEST_CASE("Only the first visit to a known result rescans its parents' proofs",
+          "[search][proof][proof-refresh]") {
+    // Lc0 v0.32.1 classic/search.cc DoBackupUpdateSingleNode: update_parent_bounds needs
+    // "!node->GetN()". Each later visit to the mate used to rescan the root's edges.
+    Fixture fixture{kMate};
+    REQUIRE(fixture.run(128).info.proof.outcome == Win);
+    const auto mates = mate_in_one(fixture.root, fixture.attacks);
+    const auto mate_visits = [&] {
+        std::uint64_t total = 0;
+        const auto roots = fixture.engine->root_moves();
+        for (const auto& row : std::span{roots.moves}.first(roots.size))
+            if (std::ranges::find(mates, row.move) != mates.end()) total += row.visits;
+        return total;
+    };
+    const auto earlier = mate_visits();
+    mouse::search::SearchLimits limits;
+    limits.nodes = 1024;
+    limits.smart_pruning = false;
+    limits.log_search_stats = true;
+    const auto result = fixture.engine->run(limits);
+    REQUIRE(result);
+    CHECK(result->info.nodes == 1024);
+    const auto gained = mate_visits() - earlier;
+    REQUIRE(gained > 256);
+    CHECK(result->stats.proof_scans * 2 < gained);
 }

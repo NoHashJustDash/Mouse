@@ -54,8 +54,36 @@ LICENSE_SHA256 = {
         "a2010f343487d3f7618affe54f789f5487602331c0a8d03f49e9a7c547cf0499"
     ),
 }
+# The NVIDIA library setup that ships beside mouse.exe (scripts/setup-gpu.ps1).
+SETUP_FILES = frozenset({"setup-gpu.ps1", "gpu-packages.json"})
 STAGE_FILES = frozenset(
-    {"mouse.exe", "README.md", "CHANGELOG.md"} | set(ORT_SHA256) | set(LICENSE_SHA256)
+    {"mouse.exe", "README.md", "CHANGELOG.md"} | SETUP_FILES | set(ORT_SHA256) | set(LICENSE_SHA256)
+)
+# A DirectML build (CMake preset windows-dml) installs ONNX Runtime's DirectML package,
+# DirectML itself, their licences and its own guide. It has no NVIDIA providers and needs
+# no NVIDIA setup. Hashes: ONNX Runtime 1.22.0 DirectML package and DirectML 1.15.4, as
+# staged by scripts/stage-directml-sdk.ps1.
+DIRECTML_LIBRARY = "DirectML.dll"
+DIRECTML_ORT_SHA256 = {
+    "onnxruntime.dll": ("95366724919f4e95ecc60010912ed538ad9804b6683fbd0aad389749102834b9"),
+    "onnxruntime_providers_shared.dll": (
+        "dea79756b1ef0deb317115aa5da45eca8946eafcf1be2dbd9fa3b309551faae5"
+    ),
+    DIRECTML_LIBRARY: ("9c9e6d822561c6c41b90e6994b3e8857cf1d66dbfb1e0c4c799c7c89b4e92da1"),
+}
+DIRECTML_LICENSE_SHA256 = {
+    **LICENSE_SHA256,
+    "licenses/DirectML-LICENSE.txt": (
+        "a05138e3a085ff60a44881eedfa58dccb03ecc1d7b1f6ae888418e8c2fec4b8d"
+    ),
+    "licenses/DirectML-ThirdPartyNotices.txt": (
+        "2c95795c13ff48a58b6ed916f37901c23d964b5d9d601af422f17ad2172e7950"
+    ),
+}
+DIRECTML_STAGE_FILES = frozenset(
+    {"mouse.exe", "README.md", "CHANGELOG.md", "DIRECTML.md"}
+    | set(DIRECTML_ORT_SHA256)
+    | set(DIRECTML_LICENSE_SHA256)
 )
 # Builds configured with MOUSE_TRT_MOE_PLUGIN=ON (CMake preset windows-moe) install the
 # Mouse-MoE TensorRT plugin and the CUTLASS 3.9.2 license it is compiled with.
@@ -68,8 +96,13 @@ PLUGIN_LICENSE_SHA256 = {
 PLUGIN_FILES = frozenset({PLUGIN_LIBRARY} | set(PLUGIN_LICENSE_SHA256))
 # The network a release ships with, under its public name. Nets that use the plugin carry
 # its operator name and cannot load without the library.
-NET_NAME = "M1.5.onnx"
+NET_NAME = "M2.1.onnx"
 PLUGIN_OP = b"MouseMoeExperts"
+# DirectML runs a graph in the graph's own precision, so a DirectML release may ship a
+# second, float16 export beside the float32 one. The ONNX metadata entry names which a
+# file is (mouse.precision, written by the exporters).
+NET_FP16_NAME = "M2.1-fp16.onnx"
+FP16_MARK = b"\x0a\x0fmouse.precision\x12\x04fp16"
 SUPPORT_REQUIRED = frozenset(
     {
         "tools/fetch_net.py",
@@ -199,6 +232,17 @@ PREREQUISITES = re.compile(
     r"cudnn(?:_(?:adv|cnn|graph|ops|heuristic|engines_precompiled|engines_runtime_compiled))?64_9|"
     r"nvinfer(?:_plugin|_dispatch|_lean)?_10|"
     r"nvonnxparser_10|nvrtc64_[0-9]+_[0-9]+|nvrtc-builtins64_[0-9]+|nvjitlink_[0-9]+_[0-9]+)\.dll"
+)
+
+
+# Windows API sets that ONNX Runtime's DirectML package and DirectML.dll import, beyond
+# the core and CRT sets above. They are part of Windows, like the WINDOWS libraries.
+DIRECTML_PREREQUISITES = re.compile(
+    r"api-ms-win-(?:appmodel-runtime|eventing-provider)-l[0-9]+-[0-9]+-[0-9]+\.dll"
+)
+# NVIDIA's libraries, which only an NVIDIA build may import.
+NVIDIA_IMPORT = re.compile(
+    r"(?:nv(?:cuda|infer|onnxparser|rtc|jitlink)|cu(?:dart|blas|fft|rand|dnn))"
 )
 
 
@@ -384,8 +428,12 @@ def parse_pe(data: bytes) -> dict[str, object]:
     return {"machine": "AMD64", "format": "PE32+", "imports": sorted(imports)}
 
 
-def stage_inventory(root: Path, plugin: bool = False) -> set[str]:
-    expected = STAGE_FILES | PLUGIN_FILES if plugin else STAGE_FILES
+def stage_inventory(root: Path, plugin: bool = False, directml: bool = False) -> set[str]:
+    require(not (plugin and directml), "A DirectML build has no TensorRT plugin")
+    if directml:
+        expected = DIRECTML_STAGE_FILES
+    else:
+        expected = STAGE_FILES | PLUGIN_FILES if plugin else STAGE_FILES
     require(
         root.is_dir()
         and not root.is_symlink()
@@ -416,7 +464,10 @@ def stage_inventory(root: Path, plugin: bool = False) -> set[str]:
             )
             regular(path)
             found.add(path.name)
-    require(found == expected, "Exact CMake install stage required (11 files, 13 with the plugin)")
+    require(
+        found == expected,
+        "Exact CMake install stage required (13 files, 15 with the plugin, 13 for DirectML)",
+    )
     return found
 
 
@@ -442,6 +493,9 @@ class Plan:
     release_files: Mapping[str, str] | None = None
     net: Path | None = None
     net_sha256: str | None = None
+    directml: bool = False
+    net_fp16: Path | None = None
+    net_fp16_sha256: str | None = None
 
     def verify(self) -> None:
         if self.release_source is not None:
@@ -455,7 +509,7 @@ class Plan:
         )
         plugin = PLUGIN_LIBRARY in self.stage_hashes
         require(
-            stage_inventory(self.stage, plugin) == set(self.stage_hashes),
+            stage_inventory(self.stage, plugin, self.directml) == set(self.stage_hashes),
             "Stage inventory changed",
         )
         for name, expected in self.stage_hashes.items():
@@ -834,6 +888,11 @@ def _produce(plan: Plan, output: Path) -> dict[str, object]:
             result["net_sha256"] = plan.net_sha256
             with plan.net.open("rb") as src, (payload / NET_NAME).open("xb") as dst:
                 shutil.copyfileobj(src, dst, 1024 * 1024)
+        if plan.net_fp16 is not None:
+            copied[NET_FP16_NAME] = cast(str, plan.net_fp16_sha256)
+            result["net_fp16_sha256"] = plan.net_fp16_sha256
+            with plan.net_fp16.open("rb") as src, (payload / NET_FP16_NAME).open("xb") as dst:
+                shutil.copyfileobj(src, dst, 1024 * 1024)
         with zipfile.ZipFile(plan.source) as archive:
             for name in plan.support:
                 target = payload / name
@@ -845,7 +904,8 @@ def _produce(plan: Plan, output: Path) -> dict[str, object]:
                     shutil.copyfileobj(member_source, dst, 1024 * 1024)
         require(all(digest(payload / n) == h for n, h in copied.items()), "Copied payload differs")
         result["copied_sha256"] = copied
-        binary_name = f"mouse-{plan.version}-windows-x64.zip"
+        flavor = "-directml" if plan.directml else ""
+        binary_name = f"mouse-{plan.version}-windows-x64{flavor}.zip"
         source_name = f"mouse-{plan.version}-source.zip"
         binary = work / binary_name
         build_zip(payload, binary, copied)
@@ -992,13 +1052,21 @@ def _release_inventory(source: Path) -> dict[str, str]:
 
 
 def produce_release(
-    source: Path, build: Path, version: str, output: Path, net: Path | None = None
+    source: Path,
+    build: Path,
+    version: str,
+    output: Path,
+    net: Path | None = None,
+    net_fp16: Path | None = None,
 ) -> dict[str, object]:
     """Package a configured release source tree without asserting tournament gates.
 
     This path is deliberately separate from the development JSON-plan interface.
     A pre-Git archive has an honest unknown commit; source content hashes bind it.
-    A network, when given, goes in the binary archive only, as NET_NAME.
+    A network, when given, goes in the binary archive only, as NET_NAME. A DirectML build
+    (the CMake cache says which) is packaged with its own runtime files as
+    mouse-<version>-windows-x64-directml.zip, and may also carry a float16 export as
+    NET_FP16_NAME.
     """
     require(
         re.fullmatch(
@@ -1040,13 +1108,39 @@ def produce_release(
     plugin_setting = fields.get("MOUSE_TRT_MOE_PLUGIN", "OFF").upper()
     require(plugin_setting in ("ON", "OFF"), "MOUSE_TRT_MOE_PLUGIN must be ON or OFF")
     plugin = plugin_setting == "ON"
+    directml_setting = fields.get("MOUSE_ORT_DIRECTML_BUILD", "OFF").upper()
+    require(directml_setting in ("ON", "OFF"), "MOUSE_ORT_DIRECTML_BUILD must be ON or OFF")
+    directml = directml_setting == "ON"
+    require(not (plugin and directml), "A DirectML build has no TensorRT plugin")
+    ort_sha256 = DIRECTML_ORT_SHA256 if directml else ORT_SHA256
+    license_sha256 = DIRECTML_LICENSE_SHA256 if directml else LICENSE_SHA256
     net_sha256: str | None = None
     if net is not None:
         net = net.absolute()
         net_sha256 = digest(net)
+        net_bytes = net.read_bytes()
         require(
-            plugin or PLUGIN_OP not in net.read_bytes(),
+            plugin or PLUGIN_OP not in net_bytes,
             "This network needs the Mouse-MoE plugin; configure with MOUSE_TRT_MOE_PLUGIN=ON",
+        )
+        require(
+            not directml or FP16_MARK not in net_bytes,
+            f"A DirectML release ships an fp32 network as {NET_NAME}; pass the fp16 export "
+            "as the fp16 network",
+        )
+    net_fp16_sha256: str | None = None
+    if net_fp16 is not None:
+        require(directml, "Only a DirectML release ships a separate fp16 network")
+        net_fp16 = net_fp16.absolute()
+        net_fp16_sha256 = digest(net_fp16)
+        net_fp16_bytes = net_fp16.read_bytes()
+        require(
+            PLUGIN_OP not in net_fp16_bytes,
+            "A DirectML build cannot run a Mouse-MoE plugin network",
+        )
+        require(
+            FP16_MARK in net_fp16_bytes,
+            f"{NET_FP16_NAME} must be an fp16 export (mouse.precision metadata)",
         )
     hashes = _release_inventory(source)
     require(
@@ -1064,15 +1158,17 @@ def produce_release(
         work = Path(temporary)
         stage = work / "stage"
         _release_command(["cmake", "--install", str(build), "--prefix", str(stage)], source)
-        stage_hashes = {name: digest(stage / name) for name in stage_inventory(stage, plugin)}
+        stage_hashes = {
+            name: digest(stage / name) for name in stage_inventory(stage, plugin, directml)
+        }
         require(
             stage_hashes["mouse.exe"] == binary_hash, "Installed binary differs from source build"
         )
         require(digest(executable) == binary_hash, "Source build binary changed during install")
         require(_release_inventory(source) == hashes, "Source folder changed during build/install")
-        require(all(stage_hashes[n] == h for n, h in ORT_SHA256.items()), "Require pinned ORT DLLs")
+        require(all(stage_hashes[n] == h for n, h in ort_sha256.items()), "Require pinned ORT DLLs")
         require(
-            all(stage_hashes[n] == h for n, h in LICENSE_SHA256.items()), "License hash differs"
+            all(stage_hashes[n] == h for n, h in license_sha256.items()), "License hash differs"
         )
         require(
             not plugin or all(stage_hashes[n] == h for n, h in PLUGIN_LICENSE_SHA256.items()),
@@ -1102,6 +1198,8 @@ def produce_release(
         identities.update({cache: cache_hash, executable: binary_hash, archived: digest(archived)})
         if net is not None:
             identities[net] = cast(str, net_sha256)
+        if net_fp16 is not None:
+            identities[net_fp16] = cast(str, net_fp16_sha256)
         interpreter_alias = Path(sys.executable).absolute()
         interpreter_target = interpreter_alias.resolve(strict=True)
         for own in (
@@ -1131,19 +1229,28 @@ def produce_release(
             release_files=hashes,
             net=net,
             net_sha256=net_sha256,
+            directml=directml,
+            net_fp16=net_fp16,
+            net_fp16_sha256=net_fp16_sha256,
         )
         plan.verify()
         require(archive_inventory(plan) == hashes, "Archived source differs from source folder")
         dependencies = {}
-        for name in ("mouse.exe", *ORT_SHA256, *([PLUGIN_LIBRARY] if plugin else [])):
+        shipped = {name.lower() for name in ort_sha256}
+        for name in ("mouse.exe", *ort_sha256, *([PLUGIN_LIBRARY] if plugin else [])):
             parsed = parse_pe((stage / name).read_bytes())
             dependencies[name] = parsed
             for imported in cast(list[str], parsed["imports"]):
                 require(
-                    imported in ORT_SHA256
+                    imported in shipped
                     or imported.removesuffix(".dll") in WINDOWS
-                    or PREREQUISITES.fullmatch(imported),
+                    or PREREQUISITES.fullmatch(imported)
+                    or (directml and DIRECTML_PREREQUISITES.fullmatch(imported)),
                     f"Unapproved external import dependency:{name}->{imported}",
+                )
+                require(
+                    not (directml and NVIDIA_IMPORT.match(imported)),
+                    f"A DirectML build must not import an NVIDIA library:{name}->{imported}",
                 )
         return _produce(replace(plan, dependencies=dependencies), output)
 
@@ -1160,6 +1267,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--build", type=Path)
     parser.add_argument("--version")
     parser.add_argument("--net", type=Path, help=f"network to ship as {NET_NAME}")
+    parser.add_argument(
+        "--net-fp16",
+        type=Path,
+        help=f"DirectML releases: fp16 export to ship as {NET_FP16_NAME}",
+    )
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args(argv)
     try:
@@ -1169,10 +1281,15 @@ def main(argv: Sequence[str] | None = None) -> int:
                 args.build is not None and args.version is not None,
                 "Release requires --build and --version",
             )
-            result = produce_release(args.source, args.build, args.version, args.output, args.net)
+            result = produce_release(
+                args.source, args.build, args.version, args.output, args.net, args.net_fp16
+            )
         else:
             require(
-                args.build is None and args.version is None and args.net is None,
+                args.build is None
+                and args.version is None
+                and args.net is None
+                and args.net_fp16 is None,
                 "Build/version/net require --source",
             )
             result = produce(args.config, args.output)

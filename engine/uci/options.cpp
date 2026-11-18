@@ -240,9 +240,8 @@ constexpr std::array kDefinitions{
                .field = Field::CollisionScalingPower,
                .kind = Kind::Real},
     Definition{.name = "OutOfOrderEval", .field = Field::OutOfOrderEval, .kind = Kind::Boolean},
-    Definition{.name = "MaxOutOfOrderEvalsFactor",
-               .field = Field::OutOfOrderFactor,
-               .kind = Kind::Real},
+    Definition{
+        .name = "MaxOutOfOrderEvalsFactor", .field = Field::OutOfOrderFactor, .kind = Kind::Real},
     Definition{.name = "MaxPrefetch",
                .field = Field::MaxPrefetch,
                .kind = Kind::Integer,
@@ -304,9 +303,8 @@ constexpr std::array kDefinitions{
                .field = Field::MaxConcurrentSearchers,
                .kind = Kind::Integer,
                .bounds = {.minimum = 0, .maximum = 128}},
-    Definition{.name = "SearchSpinBackoff",
-               .field = Field::SearchSpinBackoff,
-               .kind = Kind::Boolean},
+    Definition{
+        .name = "SearchSpinBackoff", .field = Field::SearchSpinBackoff, .kind = Kind::Boolean},
     Definition{.name = "TwoFoldDraws", .field = Field::TwoFoldDraws, .kind = Kind::Boolean},
     Definition{.name = "StickyEndgames", .field = Field::StickyEndgames, .kind = Kind::Boolean},
     Definition{.name = "FpuStrategy",
@@ -338,9 +336,7 @@ constexpr std::array kDefinitions{
                           "win_percentage|Q|W-L|WDL_mu"},
     Definition{.name = "PerPVCounters", .field = Field::PerPvCounters, .kind = Kind::Boolean},
     Definition{.name = "UCI_ShowMovesLeft", .field = Field::ShowMovesLeft, .kind = Kind::Boolean},
-    Definition{.name = "VerboseMoveStats",
-               .field = Field::VerboseMoveStats,
-               .kind = Kind::Boolean},
+    Definition{.name = "VerboseMoveStats", .field = Field::VerboseMoveStats, .kind = Kind::Boolean},
     Definition{.name = "LogFile", .field = Field::LogFile, .kind = Kind::Text},
     Definition{.name = "ConfigFile", .field = Field::ConfigFile, .kind = Kind::Text},
     Definition{.name = "TimeManager", .field = Field::TimeManager, .kind = Kind::Text},
@@ -673,8 +669,8 @@ Result<void> apply_backend_options(Options& options, std::string_view text, Reco
         const auto number = [&]() -> Result<int> {
             int parsed = 0;
             const auto end = std::from_chars(value.data(), value.data() + value.size(), parsed);
-            if (value.empty() || end.ec != std::errc{} ||
-                end.ptr != value.data() + value.size() || parsed < 0 || parsed > 1023)
+            if (value.empty() || end.ec != std::errc{} || end.ptr != value.data() + value.size() ||
+                parsed < 0 || parsed > 1023)
                 return tl::unexpected("BackendOptions " + std::string{key} +
                                       " requires an integer in 0..1023");
             return parsed;
@@ -686,7 +682,8 @@ Result<void> apply_backend_options(Options& options, std::string_view text, Reco
         } else if (key == "threads") {
             auto parsed = number();
             if (!parsed) return tl::unexpected(parsed.error());
-            if (*parsed == 0) return tl::unexpected(std::string{"BackendOptions threads requires 1 or more"});
+            if (*parsed == 0)
+                return tl::unexpected(std::string{"BackendOptions threads requires 1 or more"});
             options.backend.cpu_threads = *parsed;
         } else if (key == "precision") {
             if (value == "fp32")
@@ -694,7 +691,8 @@ Result<void> apply_backend_options(Options& options, std::string_view text, Reco
             else if (value == "fp16")
                 options.backend.precision = nn::ComputePrecision::Float16;
             else
-                return tl::unexpected(std::string{"BackendOptions precision requires fp32 or fp16"});
+                return tl::unexpected(
+                    std::string{"BackendOptions precision requires fp32 or fp16"});
         } else
             return tl::unexpected("Unknown BackendOptions key: " + std::string{key});
         impact = Reconfigure::Backend;
@@ -712,12 +710,14 @@ void set_batch(Options& options, std::size_t batch) {
     options.backend.batch_buckets = minibatch_buckets(batch);
 }
 }  // namespace
+// A GPU call is padded up to the next bucket and the padded rows run through the whole net, so
+// buckets bound the waste. Each bucket is its own TensorRT engine and session (built on a cold
+// start, warmed at load), so the list stays short: at most eight. 1 serves single positions and 8
+// small batches. Above 8 the buckets grow geometrically to the batch, in the fewest steps (at most
+// six) whose ratio is no larger than 1.5. Rounding each one up keeps a batch of n >= 8 rows at no
+// more than ratio * n physical rows: 1.5 n for a batch up to 96, (batch / 8)^(1/6) n above it.
 std::vector<std::size_t> minibatch_buckets(std::size_t batch) {
-    std::vector<std::size_t> buckets;
-    for (const std::size_t value : {std::size_t{1}, std::size_t{8}, std::size_t{32}})
-        if (value < batch) buckets.push_back(value);
-    buckets.push_back(batch);
-    return buckets;
+    return nn::batch_buckets_for(batch);
 }
 Options::Options(std::optional<std::filesystem::path> cache_override) {
     const auto cache = cache_override ? Result<std::filesystem::path>{std::move(*cache_override)}
@@ -1071,7 +1071,7 @@ Result<OptionUpdate> apply_option(const Options& original, const SetOptionComman
                 break;
             case Field::HistoryFill:
                 change(options.search.history_fill,
-                       value == "no"     ? nn::HistoryFill::No
+                       value == "no"       ? nn::HistoryFill::No
                        : value == "always" ? nn::HistoryFill::Always
                                            : nn::HistoryFill::FenOnly,
                        Reconfigure::Search);
@@ -1318,8 +1318,7 @@ Result<Options> apply_config_text(Options options, std::string_view text) {
         else if (line.front() == '-')
             return tl::unexpected(where + "only -- arguments are supported");
         const auto equals = line.find('=');
-        if (equals == std::string_view::npos)
-            return tl::unexpected(where + "expected name=value");
+        if (equals == std::string_view::npos) return tl::unexpected(where + "expected name=value");
         std::string name;
         for (const char c : line.substr(0, equals))
             if (c != '-') name.push_back(lower(c));

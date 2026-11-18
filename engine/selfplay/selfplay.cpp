@@ -346,7 +346,10 @@ class MultiplexingBackend final : public nn::Backend {
         // A value game can ask for more rows than the device's largest batch: lc0 splits those too.
         for (std::size_t at = 0; at < inputs.size(); at += maximum_rows_) {
             const auto rows = std::min(maximum_rows_, inputs.size() - at);
-            Request request{.inputs = inputs.subspan(at, rows), .outputs = outputs.subspan(at, rows)};
+            Request request{.inputs = inputs.subspan(at, rows),
+                            .outputs = outputs.subspan(at, rows),
+                            .result = {},
+                            .done = false};
             std::unique_lock lock(mutex_);
             queue_.push_back(&request);
             changed_.notify_all();

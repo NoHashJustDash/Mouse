@@ -15,6 +15,7 @@
 #include "engine/chess/movegen.h"
 #include "engine/chess/perft.h"
 #include "engine/nn/command_runner.h"
+#include "engine/nn/doctor.h"
 #include "engine/nn/model_metadata.h"
 #include "engine/search/command_runner.h"
 #include "engine/selfplay/selfplay.h"
@@ -200,6 +201,8 @@ int run(std::span<char*> arguments) {
                "       mouse selfplay --weights=<ONNX> --visits=<n> [--games=<n>] [--training]\n"
                "         Lc0's selfplay flags; prefix one with player1. player2. white. or black.\n"
                "       mouse --version | --help\n"
+               "       mouse doctor [--gpu-dll-dir <dir>]...\n"
+               "         Check the GPU setup and say what is missing.\n"
                "       mouse describe-net <ONNX>\n"
                "       mouse backend-eval --weights <ONNX> --backend " MOUSE_BACKEND_CHOICES
                "\n"
@@ -237,6 +240,9 @@ int run(std::span<char*> arguments) {
     if (arguments.size() >= 2 && std::string_view{arguments[1]} == "build-tensorrt-cache") {
         return mouse::nn::run_backend_command(mouse::nn::BackendCommandKind::BuildCache,
                                               arguments.subspan(2));
+    }
+    if (arguments.size() >= 2 && std::string_view{arguments[1]} == "doctor") {
+        return mouse::nn::run_doctor_command(arguments.subspan(2));
     }
     if (arguments.size() >= 2 && std::string_view{arguments[1]} == "bench") {
         return mouse::uci::run_bench_command(arguments.subspan(2));

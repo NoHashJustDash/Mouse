@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 cmake_minimum_required(VERSION 3.28)
-project(Mouse VERSION 1.1.0 LANGUAGES CXX)
+project(Mouse VERSION 2.0.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -35,6 +35,25 @@ else()
 endif()
 if(NOT CMAKE_BUILD_TYPE)
   message(FATAL_ERROR "Set CMAKE_BUILD_TYPE or use a documented configure preset")
+endif()
+# Link-time optimisation for Mouse's own C++ targets (mouse_target_options), so calls
+# across its static libraries can inline. Vendored, CUDA and imported libraries keep
+# their normal build. On by default only for Release.
+if(CMAKE_BUILD_TYPE STREQUAL "Release")
+  set(mouse_ipo_default ON)
+else()
+  set(mouse_ipo_default OFF)
+endif()
+option(MOUSE_ENABLE_IPO "Link-time optimisation (IPO/LTCG) for Mouse's own C++ targets" ${mouse_ipo_default})
+if(MOUSE_ENABLE_IPO)
+  include(CheckIPOSupported)
+  check_ipo_supported(RESULT mouse_ipo_supported OUTPUT mouse_ipo_output LANGUAGES CXX)
+  if(NOT mouse_ipo_supported)
+    message(FATAL_ERROR "MOUSE_ENABLE_IPO is ON, but ${CMAKE_CXX_COMPILER_ID} "
+      "${CMAKE_CXX_COMPILER_VERSION} cannot do link-time "
+      "optimisation here: ${mouse_ipo_output}\nInstall the toolchain's LTO support (for example "
+      "gcc-ar, llvm-ar or the LLVM linker plugin), or configure with -DMOUSE_ENABLE_IPO=OFF.")
+  endif()
 endif()
 set(MOUSE_COMPILER "${CMAKE_CXX_COMPILER_ID} ${CMAKE_CXX_COMPILER_VERSION}")
 include(cmake/ValidateBuildIdentity.cmake)
@@ -76,7 +95,7 @@ mouse_target_options(mouse_chess)
 add_library(mouse_nn STATIC engine/nn/encoder.cpp engine/nn/policy_map.cpp
   engine/nn/history.cpp engine/nn/model_metadata.cpp engine/nn/model_artifact.cpp engine/nn/commands.cpp engine/nn/output.cpp
   engine/nn/backend.cpp engine/nn/backend_gpu.cpp engine/nn/tensorrt_builder.cpp engine/nn/cache.cpp
-  engine/nn/cached_backend.cpp engine/nn/legal_output.cpp engine/nn/legal_cache.cpp engine/nn/legal_evaluator.cpp engine/nn/command_runner.cpp)
+  engine/nn/cached_backend.cpp engine/nn/legal_output.cpp engine/nn/legal_cache.cpp engine/nn/legal_evaluator.cpp engine/nn/command_runner.cpp engine/nn/gpu_directories.cpp engine/nn/doctor.cpp)
 target_include_directories(mouse_nn PUBLIC "${PROJECT_SOURCE_DIR}")
 target_link_libraries(mouse_nn PUBLIC mouse_chess mouse_util PRIVATE Threads::Threads)
 # Header-only vendor API declarations give dynamic GPU calls their exact ABI.
@@ -94,6 +113,7 @@ if(MOUSE_CUDA_INCLUDE_DIR)
 else()
   target_compile_definitions(mouse_nn PRIVATE MOUSE_HAS_CUDA_HEADERS=0)
 endif()
+target_compile_definitions(mouse_nn PRIVATE MOUSE_ORT_GPU_PROVIDERS=$<BOOL:${MOUSE_ORT_HAS_GPU_PROVIDER}>)
 # DirectML builds choose their GPU through DXGI; ORT's DirectML provider does the rest.
 if(MOUSE_ORT_DIRECTML)
   target_compile_definitions(mouse_nn PUBLIC MOUSE_DIRECTML=1)
@@ -177,10 +197,12 @@ if(BUILD_TESTING)
   add_library(mouse_wrong_ort SHARED tests/util/wrong_ort_library.cpp)
   target_include_directories(mouse_wrong_ort SYSTEM PRIVATE "${MOUSE_ORT_INCLUDE_DIR}")
   mouse_target_options(mouse_wrong_ort)
+  # Its export list is read from object symbol tables, which link-time code generation defers.
+  set_target_properties(mouse_wrong_ort PROPERTIES INTERPROCEDURAL_OPTIMIZATION OFF)
   set_target_properties(mouse_wrong_ort PROPERTIES PREFIX "" WINDOWS_EXPORT_ALL_SYMBOLS ON)
 
   add_executable(mouse_tests tests/util/runtime_library_test.cpp tests/util/sha256_test.cpp tests/util/hash128_test.cpp tests/gpu/runtime_gpu_test.cpp
-    tests/chess/attacks_test.cpp tests/chess/position_test.cpp tests/chess/perft_suite_test.cpp tests/nn/encoder_test.cpp tests/nn/policy_map_test.cpp tests/nn/history_test.cpp tests/nn/model_metadata_test.cpp tests/nn/model_artifact_test.cpp tests/nn/commands_test.cpp tests/nn/backend_test.cpp tests/nn/cache_test.cpp tests/nn/cached_backend_test.cpp tests/nn/legal_cache_test.cpp
+    tests/chess/attacks_test.cpp tests/chess/position_test.cpp tests/chess/perft_suite_test.cpp tests/nn/encoder_test.cpp tests/nn/policy_map_test.cpp tests/nn/history_test.cpp tests/nn/model_metadata_test.cpp tests/nn/model_artifact_test.cpp tests/nn/commands_test.cpp tests/nn/gpu_directories_test.cpp tests/nn/doctor_test.cpp tests/nn/backend_test.cpp tests/nn/cache_test.cpp tests/nn/cached_backend_test.cpp tests/nn/legal_cache_test.cpp
     tests/search/tree_test.cpp tests/search/proof_test.cpp tests/search/proof_search_test.cpp tests/search/moves_left_test.cpp tests/search/draw_rate_test.cpp tests/search/prior_test.cpp
     tests/search/selection_test.cpp tests/search/pruning_test.cpp tests/search/collisions_test.cpp tests/search/rules_test.cpp tests/search/commands_test.cpp tests/search/search_test.cpp tests/search/pipeline_test.cpp tests/search/lc0_options_test.cpp tests/search/lc0_parity_features_test.cpp tests/search/pick_stress_test.cpp tests/search/pick_queue_test.cpp tests/search/tablebase_test.cpp tests/selfplay/selfplay_test.cpp tests/uci/lc0_options_test.cpp tests/uci/commands_test.cpp tests/uci/score_test.cpp tests/uci/options_test.cpp tests/uci/session_test.cpp
         tests/uci/report_test.cpp tests/uci/time_test.cpp tests/uci/input_test.cpp tests/uci/input_request_test.cpp tests/uci/bench_test.cpp)
@@ -360,6 +382,10 @@ if(MOUSE_ORT_DIRECTML)
   install(FILES "${MOUSE_ORT_ROOT}/DirectML-LICENSE.txt" "${MOUSE_ORT_ROOT}/DirectML-ThirdPartyNotices.txt"
     DESTINATION licenses)
   install(FILES "${PROJECT_SOURCE_DIR}/docs/DIRECTML.md" DESTINATION .)
+else()
+  # The NVIDIA library setup: fills the gpu folder Mouse uses when GpuDllDirectories is empty.
+  install(FILES "${PROJECT_SOURCE_DIR}/scripts/setup-gpu.ps1" "${PROJECT_SOURCE_DIR}/scripts/gpu-packages.json"
+    DESTINATION .)
 endif()
 
 install(FILES "${PROJECT_SOURCE_DIR}/LICENSE" "${PROJECT_SOURCE_DIR}/README.md"

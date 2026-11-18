@@ -176,7 +176,8 @@ TEST_CASE("Display options change what info lines say", "[uci][session][lc0-opti
     CHECK(h.any_contains("(P: "));
     CHECK_FALSE(h.any_contains(" nodes 50 nps"));
 }
-TEST_CASE("LogFile records both directions, and a bad path is reported", "[uci][session][lc0-options]") {
+TEST_CASE("LogFile records both directions, and a bad path is reported",
+          "[uci][session][lc0-options]") {
     const auto path = std::filesystem::temp_directory_path() / "mouse-session-test.log";
     std::filesystem::remove(path);
     {
@@ -213,7 +214,8 @@ TEST_CASE("Valuehead evaluates every move and takes a mate", "[uci][session][lc0
     CHECK(h.any_contains(" score mate 1"));
     CHECK(h.count("info depth") == 1);
 }
-TEST_CASE("Valuehead with no mate splits positions into backend batches", "[uci][session][lc0-options]") {
+TEST_CASE("Valuehead with no mate splits positions into backend batches",
+          "[uci][session][lc0-options]") {
     Harness h{0, true, {}, mouse::uci::SearchAlgorithm::ValueHead};
     CHECK(h.send("position startpos"));
     CHECK(h.send("go nodes 1"));
@@ -250,7 +252,7 @@ TEST_CASE("Automatic MinibatchSize is resolved for the backend before it loads",
     REQUIRE(h.send("isready"));
     REQUIRE(h.wait("readyok"));
     // The CPU backend recommends 64 (nn::recommended_minibatch).
-    CHECK(loaded == std::vector<std::size_t>{1, 8, 32, 64});
+    CHECK(loaded == std::vector<std::size_t>{1, 8, 12, 16, 23, 32, 46, 64});
     CHECK(h.count("info string MinibatchSize auto: 64") == 1);
     REQUIRE(h.send("go nodes 64"));
     REQUIRE(h.wait("bestmove "));
@@ -988,8 +990,18 @@ TEST_CASE("Emergency choices rank visits Q and priors before reused evidence",
     const chess::Move c{chess::square(1, 0), chess::square(2, 2)};
     search::RootStatistics roots;
     roots.size = 2;
-    roots.moves[0] = {.move = a, .visits = 4, .q = -0.5, .prior = 0.1F, .child_proof = {}};
-    roots.moves[1] = {.move = b, .visits = 3, .q = 0.5, .prior = 0.9F, .child_proof = {}};
+    roots.moves[0] = {.move = a,
+                      .visits = 4,
+                      .q = -0.5,
+                      .prior = 0.1F,
+                      .child_proof = {},
+                      .moves_left = std::nullopt};
+    roots.moves[1] = {.move = b,
+                      .visits = 3,
+                      .q = 0.5,
+                      .prior = 0.9F,
+                      .child_proof = {},
+                      .moves_left = std::nullopt};
     CHECK(uci::emergency_choice(roots, {.reused = c, .deterministic = c}).move == a);
     roots.moves[1].visits = 4;
     CHECK(uci::emergency_choice(roots, {.reused = c, .deterministic = c}).move == b);
@@ -1101,7 +1113,7 @@ TEST_CASE("Ponderhit starts its deadline without waiting for accepted inference 
     CHECK(h.count("info string error ") == failure);
 }
 
-TEST_CASE("A known slow provider preserves the full clock without accepting an over-budget batch",
+TEST_CASE("A known slow provider accepts no over-budget batch and replies within its clock",
           "[uci][session][legacy-v1]") {
     Harness h;
     REQUIRE(h.send("isready"));
@@ -1117,10 +1129,64 @@ TEST_CASE("A known slow provider preserves the full clock without accepting an o
     const auto began = std::chrono::steady_clock::now();
     REQUIRE(h.send("go movetime 80"));  // Source common stopper subtracts30ms overhead.
     REQUIRE(h.wait("bestmove "));
-    CHECK(std::chrono::steady_clock::now() - began >= std::chrono::milliseconds{50});
     CHECK(std::chrono::steady_clock::now() - began <= std::chrono::milliseconds{100});
     REQUIRE(h.send("isready"));
     CHECK(h.calls == 1);
+}
+
+TEST_CASE("A move with no time for a physical root path is played at once and banks its time",
+          "[uci][session][legacy-v1][exhausted-schedule]") {
+    // Regression: such a move searched nothing but was held to its deadline, so every low-clock
+    // move after one slow root path spent its whole allocation on zero new nodes.
+    using Clock = std::chrono::steady_clock;
+    Harness h;
+    REQUIRE(h.send("setoption name MoveOverheadMs value 0"));
+    REQUIRE(h.send("setoption name SmartPruningFactor value 0"));
+    REQUIRE(h.send("setoption name LogSearchStats value true"));
+    REQUIRE(h.send("isready"));
+    // One 100 ms root path: no physical call then fits the 89 ms first clock move below.
+    h.evaluate_hook = [] { std::this_thread::sleep_for(std::chrono::milliseconds{100}); };
+    REQUIRE(h.send("go nodes 1"));
+    REQUIRE(h.wait("bestmove "));
+    REQUIRE(h.send("isready"));
+    REQUIRE(h.calls == 1);
+    {
+        const std::lock_guard lock(h.mutex);
+        h.lines.clear();
+    }
+    // Native legacy first move at 1000+10 with no overhead is 89 ms (time_test, saved time).
+    const auto began = Clock::now();
+    REQUIRE(h.send("go wtime 1000 btime 1000 winc 10 binc 10"));
+    REQUIRE(h.wait("bestmove "));
+    const auto exhausted_reply = Clock::now() - began;
+    using Milliseconds = std::chrono::duration<double, std::milli>;
+    INFO("exhausted reply ms=" << Milliseconds(exhausted_reply).count());
+    // The old hold replied at the 89 ms deadline; the reply now follows the prime run.
+    CHECK(exhausted_reply <= std::chrono::milliseconds{40});
+    REQUIRE(h.send("isready"));
+    CHECK(h.calls == 1);  // Still no over-budget provider call.
+    CHECK(h.any_contains(" schedule_exhausted 1 "));
+    // A new backend clears the latency window; the game and its time bank carry on.
+    REQUIRE(h.send("setoption name WeightsFile value replacement-fixture.onnx"));
+    REQUIRE(h.send("isready"));
+    h.evaluate_hook = [] { std::this_thread::sleep_for(std::chrono::milliseconds{5}); };
+    {
+        const std::lock_guard lock(h.mutex);
+        h.lines.clear();
+    }
+    // Without the bank this move gets about 29 ms ((1000 + 10 * 50) / 51). With the 89 ms
+    // limit less the early reply banked and spent at once (immediate-use 1), it gets about 110.
+    const auto next = Clock::now();
+    REQUIRE(h.send("go wtime 1000 btime 1000 winc 10 binc 10"));
+    REQUIRE(h.wait("bestmove "));
+    const auto banked_reply = Clock::now() - next;
+    INFO("banked reply ms=" << Milliseconds(banked_reply).count());
+    CHECK(banked_reply >= std::chrono::milliseconds{60});
+    CHECK(banked_reply <= std::chrono::milliseconds{170});
+    REQUIRE(h.send("isready"));
+    CHECK(h.any_contains(" schedule_exhausted 0 "));
+    CHECK(h.count("info string error ") == 0);
+    CHECK(h.session->exit_code() == 0);
 }
 
 #ifdef _WIN32

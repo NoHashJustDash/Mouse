@@ -525,6 +525,33 @@ struct SearchEngine::Impl {
         seldepth = 0;
         return true;
     }
+    // Lc0 v0.32.1 classic/node.cc NodeTree::MakeMove: "if (new_head->IsTerminal())
+    // new_head->MakeNotTerminal();", and Node::MakeNotTerminal recounts N as one own visit plus
+    // its children's ("n_++; for (const auto& child : Edges()) ... n_ += n;"). A proven node below
+    // the root took visits without passing them on (proof_terminal); as the root it is searched
+    // again. Its bounds stay (Lc0 keeps lower_bound_ and upper_bound_), so Mouse keeps its proof,
+    // the exact value at the new count that backup_locked gives a proven root, and its mean
+    // moves left.
+    void make_root_not_terminal_locked() {
+        auto& node = tree->node(0);
+        if (!config.proof_stops_descent || !config.terminal_proof || config.dag ||
+            node.state != NodeState::Expanded || node.proof.outcome == ProofOutcome::Unknown)
+            return;
+        std::uint64_t counted = 1;
+        for (const auto& edge : tree->edges(0))
+            if (edge.child != kNoNode) counted += tree->node(edge.child).visits;
+        if (counted >= node.visits) return;
+        const auto exact = proof_value(node.proof);
+        const bool complete = node.moves_left_samples == node.visits;
+        const double moves =
+            complete ? node.moves_left_sum / static_cast<double>(node.visits) : 0.0;
+        node.visits = counted;
+        node.value_sum = exact.q * static_cast<double>(counted);
+        node.draw_sum = exact.draw * static_cast<double>(counted);
+        // An incomplete mean stays unusable at any count.
+        node.moves_left_samples = complete ? counted : 0;
+        node.moves_left_sum = moves * static_cast<double>(node.moves_left_samples);
+    }
     void cancel_collisions_locked(Slot& slot) noexcept {
         // lc0 classic/search.cc CancelSharedCollisions: cancel ancestors only;
         // no collided visit becomes an evaluation, value backup or real visit.
@@ -605,8 +632,9 @@ struct SearchEngine::Impl {
     }
     // How a picked node is handled. Mouse states map to lc0's checks in
     // PickNodesToExtendTask: Pending is an in-flight leaf (N == 0 with visits
-    // started), Unexpanded a new leaf, Known a terminal or depth-limited leaf
-    // whose stored value is backed up again, Interior an expanded node.
+    // started), Unexpanded a new leaf, Known a terminal, depth-limited or
+    // proven (proof_terminal) node whose stored value is backed up again,
+    // Interior an expanded node.
     enum class PickKind : std::uint8_t { Collision, Fresh, Known, Interior };
     struct PickLocation {
         NodeId id;
@@ -649,7 +677,8 @@ struct SearchEngine::Impl {
         const auto& shared = tree->low(low_id);
         if (!shared.transposition) return false;
         const auto& node = tree->node(id);
-        if (shared.proof.outcome != ProofOutcome::Unknown && shared.proof != node.proof) return true;
+        if (shared.proof.outcome != ProofOutcome::Unknown && shared.proof != node.proof)
+            return true;
         if (shared.visits == 0 || node.visits == 0) return false;
         const auto low_visits = static_cast<double>(shared.visits);
         const auto node_visits = static_cast<double>(node.visits);
@@ -660,24 +689,42 @@ struct SearchEngine::Impl {
             kDrawDifferenceLimit)
             return true;
         if (shared.moves_left_samples == shared.visits && node.moves_left_samples == node.visits &&
-            std::abs(shared.moves_left_sum / low_visits + 1.0 - node.moves_left_sum / node_visits) >=
-                kMovesDifferenceLimit)
+            std::abs(shared.moves_left_sum / low_visits + 1.0 -
+                     node.moves_left_sum / node_visits) >= kMovesDifferenceLimit)
             return true;
         return false;
     }
-    PickKind classify_locked(PickWalk& walk, PickLocation location,
-                             std::uint8_t repetitions = 0) {
+    // Lc0 v0.32.1 classic/search.cc MaybeSetBounds makes a node whose bounds meet terminal
+    // ("p->MakeTerminal(...)"), never the root ("p != search_->root_node_"), and
+    // PickNodesToExtendTask never descends into a terminal node ("if (node->GetN() == 0 ||
+    // node->IsTerminal())"). Mouse keeps such a node expanded with its proof; this says whether it
+    // counts as terminal. `depth` is its distance from the root.
+    [[nodiscard]] bool proof_terminal(const Node& node, std::size_t depth) const noexcept {
+        return config.proof_stops_descent && config.terminal_proof && !config.dag && depth != 0 &&
+               node.state == NodeState::Expanded && node.proof.outcome != ProofOutcome::Unknown;
+    }
+    // Tree::revert_twofold removes a twofold's samples as the draws they reached each ancestor
+    // with. A proven node below the root replaced them (backup_locked) for every ancestor above
+    // it, by its exact result from whenever it was proven, so they can no longer be told apart.
+    // A walk passes no such node while proof_stops_descent is on.
+    [[nodiscard]] bool twofold_revertible(std::span<const NodeId> ancestors) const {
+        for (std::size_t i = 1; i < ancestors.size(); ++i)
+            if (tree->node(ancestors[i]).proof.outcome != ProofOutcome::Unknown) return false;
+        return true;
+    }
+    PickKind classify_locked(PickWalk& walk, PickLocation location, std::uint8_t repetitions = 0) {
         const auto [id, depth] = location;
         auto& node = tree->node(id);
         // lc0 fd71a2d classic/search.cc EnsureNodeTwoFoldCorrectForDepth: a
         // reused twofold whose earlier occurrence is now above the root is no
         // longer a draw. walk.path starts with root..parent. One with visits
-        // in flight stays terminal until a later pick reaches it quiescent.
+        // in flight stays terminal until a later pick reaches it quiescent, and
+        // one below a proven node stays a draw (twofold_revertible).
         if (node.state == NodeState::Terminal && node.twofold && node.in_flight == 0 &&
-            static_cast<double>(depth) < *node.leaf_moves_left) {
+            static_cast<double>(depth) < *node.leaf_moves_left &&
+            twofold_revertible(std::span{walk.path.nodes}.first(depth))) {
             const std::lock_guard lock(picker.shared_state);
-            const auto reverted =
-                tree->revert_twofold(std::span{walk.path.nodes}.first(depth), id);
+            const auto reverted = tree->revert_twofold(std::span{walk.path.nodes}.first(depth), id);
             if (!reverted) throw std::logic_error(reverted.error());
             inherited -= std::min(inherited, *reverted);
             if (limits.log_search_stats) ++diagnostics.twofold_reverts;
@@ -687,7 +734,7 @@ struct SearchEngine::Impl {
             node.state = NodeState::Unexpanded;
         if (node.state == NodeState::Unexpanded) return PickKind::Fresh;
         if (node.state == NodeState::Terminal || node.state == NodeState::Frontier ||
-            depth == ceiling())
+            depth == ceiling() || proof_terminal(node, depth))
             return PickKind::Known;
         if (config.dag) {
             // A table hit whose first backup waits for its batch has no value to pick from yet.
@@ -830,9 +877,7 @@ struct SearchEngine::Impl {
                picker.best_visits - visits <= picker.remaining_playouts;
     }
     // DAG picking keeps the position of the node it stands on in the coordinator's scratch.
-    [[nodiscard]] chess::Position& dag_position() {
-        return *workers.back().position;
-    }
+    [[nodiscard]] chess::Position& dag_position() { return *workers.back().position; }
     void distribute_locked(Slot& slot, PickWalk& walk, PickLevel& level,
                            PickDistribution distribution) {
         auto [depth, limit, first_entry] = distribution;
@@ -843,10 +888,9 @@ struct SearchEngine::Impl {
             throw std::logic_error("Search node has more edges than legal chess moves");
         const bool at_root = depth == 0;
         const double draw_score = draw_score_at(depth);
-        const double parent_q =
-            node.visits == 0
-                ? 0
-                : (node.value_sum + draw_score * node.draw_sum) / static_cast<double>(node.visits);
+        const double parent_q = node.visits == 0 ? 0
+                                                 : (node.value_sum + draw_score * node.draw_sum) /
+                                                       static_cast<double>(node.visits);
         double mass = 0;
         for (const auto& edge : edges)
             if ((!at_root || allowed(edge.move)) && edge.child != kNoNode &&
@@ -916,11 +960,10 @@ struct SearchEngine::Impl {
             ++rounds;
             auto& edge = edges[chosen];
             if (config.dag) resolve_repetitions(terms[chosen], edge, depth);
-            const auto kind =
-                edge.child == kNoNode
-                    ? PickKind::Fresh
-                    : classify_locked(walk, {.id = edge.child, .depth = depth + 1},
-                                      terms[chosen].repetitions);
+            const auto kind = edge.child == kNoNode
+                                  ? PickKind::Fresh
+                                  : classify_locked(walk, {.id = edge.child, .depth = depth + 1},
+                                                    terms[chosen].repetitions);
             if (kind == PickKind::Interior) {
                 terms[chosen].started += granted;
             } else {
@@ -1221,7 +1264,8 @@ struct SearchEngine::Impl {
         Value value{.q = (static_cast<double>(wdl[0]) - wdl[2]) / sum,
                     .draw = wdl[1] / sum,
                     .moves_left = moves_left};
-        const bool contempt = wdl_rescale.diff != 0.0F && limits.contempt_side != ContemptSide::None;
+        const bool contempt =
+            wdl_rescale.diff != 0.0F && limits.contempt_side != ContemptSide::None;
         if (wdl_rescale.ratio != 1.0F || contempt) {
             auto q = static_cast<float>(value.q);
             auto draw = static_cast<float>(value.draw);
@@ -1259,6 +1303,70 @@ struct SearchEngine::Impl {
         const auto result = accumulator->finish();
         if (!result) throw std::logic_error(result.error());
         node.proof = *result;
+    }
+    // A proven result as the proven node's own value (Lc0 Node::MakeTerminal wl_ and d_).
+    [[nodiscard]] static Value proof_value(NodeProof proof) noexcept {
+        return {.q = proof.outcome == ProofOutcome::Win    ? 1.0
+                     : proof.outcome == ProofOutcome::Loss ? -1.0
+                                                           : 0.0,
+                .draw = proof.outcome == ProofOutcome::Draw ? 1.0 : 0.0,
+                .moves_left = std::nullopt};
+    }
+    // Lc0 v0.32.1 classic/node.cc Node::MakeTerminal, for a result that loses for the side that
+    // moved into the node: "Terminal losses have no uncertainty and no reason for their U value to
+    // be comparable to another non-loss choice. Force this by clearing the policy."
+    // (GetOwnEdge()->SetP(0.0f), never at the root). Only the parent's own edges are searched.
+    // FPU's visited prior mass is summed afresh from edge priors at every use, so it follows.
+    void zero_losing_prior_locked(NodeId parent, NodeId child) {
+        for (auto& edge : tree->edges(parent)) {
+            if (edge.child != child) continue;
+            edge.prior_bits = 0;
+            return;
+        }
+        throw std::logic_error("Search proven node is missing from its parent's edges");
+    }
+    // Lc0 v0.32.1 classic/search.cc DoBackupUpdateSingleNode n_to_fix, v_delta, d_delta and
+    // m_delta after MaybeSetBounds made a node terminal, kept as totals (n_to_fix times each
+    // delta): what each unproven ancestor adds (Node::AdjustForTerminal) so that the visits it
+    // received through that node count with the node's exact result. `value` uses the viewpoint
+    // of the node being updated; draws and moves left need no flip.
+    struct TerminalFix {
+        std::uint64_t count = 0;
+        double value = 0, draw = 0, moves_left = 0;
+        bool moves_left_known = false;
+    };
+    // Lc0 v0.32.1 classic/search.cc MaybeSetBounds plies_left: "(upper == GameResult::BLACK_WON ?
+    // std::max(losing_m, m) : m) + 1.0f", m being the moves left of the child the visit came
+    // through and losing_m the longest of the children that win ("edge.GetM(0.0f)", zero for one
+    // without visits). `arriving` is this visit's sample at the node, already m + 1. Mouse has no
+    // M without a head, so an unknown sample gives none, and a child without complete samples
+    // counts as zero.
+    [[nodiscard]] std::optional<double> proven_moves_left(NodeId id,
+                                                          std::optional<double> arriving) const {
+        if (!arriving) return std::nullopt;
+        if (tree->node(id).proof.outcome != ProofOutcome::Loss) return arriving;
+        double longest = 0.0;
+        for (const auto& edge : tree->edges(id)) {
+            if (edge.child == kNoNode) continue;
+            const auto& child = tree->node(edge.child);
+            if (child.proof.outcome != ProofOutcome::Win || child.visits == 0 ||
+                child.moves_left_samples != child.visits)
+                continue;
+            longest = std::max(longest, child.moves_left_sum / static_cast<double>(child.visits));
+        }
+        return std::max(longest + 1.0, *arriving);
+    }
+    // What a known leaf backs up: a terminal's stored value or, for a proven node below the root,
+    // its exact result and moves left (Lc0 DoBackupUpdateSingleNode: "if (n->IsTerminal()) { v =
+    // n->GetWL(); d = n->GetD(); m = n->GetM(); }").
+    [[nodiscard]] Value known_value_locked(const Request& request) const {
+        const auto& leaf = tree->node(request.path.nodes.at(request.path.size - 1));
+        if (!proof_terminal(leaf, request.path.size - 1))
+            return {.q = leaf.leaf_q, .draw = leaf.leaf_draw, .moves_left = leaf.leaf_moves_left};
+        auto value = proof_value(leaf.proof);
+        if (leaf.visits != 0 && leaf.moves_left_samples == leaf.visits)
+            value.moves_left = leaf.moves_left_sum / static_cast<double>(leaf.visits);
+        return value;
     }
     // A moved child with visits in flight is still named by the paths reserving them. They hold
     // it at its depth, so each is checked once. Paths are only read under tree_mutex.
@@ -1299,42 +1407,103 @@ struct SearchEngine::Impl {
             if (tree->node(request.path.nodes.at(i)).visits ==
                 std::numeric_limits<std::uint64_t>::max())
                 throw std::overflow_error("Search visit counter exhausted");
-        // lc0 fd71a2d classic/search.cc DoBackupUpdateSingleNode propagates
-        // bounds only when terminal information changes. NN samples cannot
-        // change a proof. Mouse also propagates mate-bound refinements, stopping
-        // once the complete parent proof is unchanged (not just its outcome).
-        bool proof_changed =
-            tree->node(request.path.nodes.at(request.path.size - 1)).proof.outcome !=
-            ProofOutcome::Unknown;
+        const auto& path = request.path;
+        // Lc0 v0.32.1 classic/search.cc DoBackupUpdateSingleNode: "For the first visit to a
+        // terminal, maybe update parent bounds too" (update_parent_bounds = StickyEndgames &&
+        // node->IsTerminal() && !node->GetN()); a later visit brings nothing new, and NN samples
+        // cannot change a proof. Mouse also propagates mate-bound refinements, stopping once the
+        // complete parent proof is unchanged (not just its outcome).
+        const auto& leaf = tree->node(path.nodes.at(path.size - 1));
+        bool proof_changed = leaf.proof.outcome != ProofOutcome::Unknown && leaf.visits == 0;
         bool root_child_proof_changed = false;
-        for (std::size_t i = request.path.size; i > 0; --i) {
-            auto& node = tree->node(request.path.nodes.at(i - 1));
-            ++node.visits;
-            if (i != request.path.size && proof_changed) {
+        const bool adjust = config.terminal_proof && config.proof_adjusts_ancestors;
+        TerminalFix fix;
+        for (std::size_t i = path.size; i > 0; --i) {
+            const auto id = path.nodes.at(i - 1);
+            const auto depth = i - 1;
+            auto& node = tree->node(id);
+            // Lc0 runs MaybeSetBounds on a node before adding the visit to it, so n_to_fix is
+            // "p->GetN()" without this visit.
+            bool became_proven = false;
+            if (i != path.size && proof_changed) {
                 const auto previous = node.proof;
-                refresh_proof_locked(request.path.nodes.at(i - 1));
+                refresh_proof_locked(id);
                 proof_changed = node.proof != previous;
+                became_proven = previous.outcome == ProofOutcome::Unknown &&
+                                node.proof.outcome != ProofOutcome::Unknown;
             }
             if (i == 2) root_child_proof_changed = proof_changed;
-            if (node.proof.outcome != ProofOutcome::Unknown) {
-                value.q = node.proof.outcome == ProofOutcome::Win
-                              ? 1.0
-                              : (node.proof.outcome == ProofOutcome::Loss ? -1.0 : 0.0);
-                value.draw = node.proof.outcome == ProofOutcome::Draw ? 1.0 : 0.0;
-                // Exact outcomes replace historical NN dilution at the existing
-                // real visit count. Never synthesize visits or collapse a proven
-                // expanded node: descendants must keep receiving real playouts.
+            const bool proven = node.proof.outcome != ProofOutcome::Unknown;
+            std::optional<double> proven_moves;
+            if (became_proven && depth != 0) {
+                // Node::MakeTerminal(GameResult::BLACK_WON): the parent's move into a won
+                // position loses.
+                if (node.proof.outcome == ProofOutcome::Win && config.proof_zeroes_losing_prior)
+                    zero_losing_prior_locked(path.nodes.at(i - 2), id);
+                if (adjust) {
+                    // MaybeSetBounds: "*n_to_fix = p->GetN(); ... *v_delta = -(p->GetWL() -
+                    // cur_v); *d_delta = p->GetD() - cur_d; *m_delta = p->GetM() - cur_m;",
+                    // which replaces any fix from below: this node's old sums never had it.
+                    proven_moves = proven_moves_left(id, value.moves_left);
+                    const auto exact = proof_value(node.proof);
+                    const auto count = static_cast<double>(node.visits);
+                    fix = TerminalFix{.count = node.visits,
+                                      .value = exact.q * count - node.value_sum,
+                                      .draw = exact.draw * count - node.draw_sum,
+                                      .moves_left = 0.0,
+                                      .moves_left_known = false};
+                    if (proven_moves && node.moves_left_samples == node.visits) {
+                        fix.moves_left = *proven_moves * count - node.moves_left_sum;
+                        fix.moves_left_known = true;
+                    }
+                }
+            } else if (proven) {
+                // "If parent already is terminal further adjustment is not required."
+                fix.count = 0;
+            }
+            ++node.visits;
+            if (proven) {
+                const auto exact = proof_value(node.proof);
+                value.q = exact.q;
+                value.draw = exact.draw;
+                // Exact outcomes replace historical NN dilution at the existing real visit count
+                // (Node::MakeTerminal sets wl_ and d_ whatever N is).
                 node.value_sum = value.q * static_cast<double>(node.visits);
                 node.draw_sum = value.draw * static_cast<double>(node.visits);
             } else {
                 node.value_sum += value.q;
                 node.draw_sum += value.draw;
+                // Node::AdjustForTerminal: "wl_ += multivisit * v / n_" is this total over n_.
+                if (fix.count != 0) {
+                    node.value_sum += fix.value;
+                    node.draw_sum += fix.draw;
+                }
             }
-            backup_moves_left_sample(node, value.moves_left);
+            if (proven_moves) {
+                // Node::MakeTerminal: "m_ = plies_left", whatever N is.
+                node.moves_left_sum = *proven_moves * static_cast<double>(node.visits);
+                node.moves_left_samples = node.visits;
+                value.moves_left = *proven_moves + 1.0;
+            } else if (adjust && proven && depth != 0 && node.visits > 1 &&
+                       node.moves_left_samples + 1 == node.visits) {
+                // DoBackupUpdateSingleNode: "if (n->IsTerminal()) { ... m = n->GetM(); }": a
+                // proven node passes on its own moves left, not the sample from below.
+                std::optional<double> own =
+                    node.moves_left_sum / static_cast<double>(node.moves_left_samples);
+                backup_moves_left_sample(node, own);
+                value.moves_left = own;
+            } else {
+                backup_moves_left_sample(node, value.moves_left);
+                if (fix.count != 0 && fix.moves_left_known && !proven &&
+                    node.moves_left_samples == node.visits)
+                    node.moves_left_sum += fix.moves_left;
+            }
+            // Lc0 Node::MakeSolid refuses a terminal node.
             if (node.visits >= config.solid_tree_threshold && !node.solid &&
-                node.state == NodeState::Expanded)
-                maybe_solidify_locked(request.path.nodes.at(i - 1), i - 1);
+                node.state == NodeState::Expanded && !proof_terminal(node, depth))
+                maybe_solidify_locked(id, depth);
             value.q = -value.q;
+            fix.value = -fix.value;
         }
         finish_backup_locked(request, root_child_proof_changed);
         if (limits.log_search_stats) diagnostics.backup += Clock::now() - began;
@@ -1404,12 +1573,10 @@ struct SearchEngine::Impl {
         if (shared.moves_left_samples == shared.visits)
             value.moves_left = shared.moves_left_sum / visits + 1.0;
         value.to_fix = node.visits;
-        value.q_delta = node.visits == 0
-                            ? 0.0
-                            : value.q - node.value_sum / static_cast<double>(node.visits);
-        value.draw_delta = node.visits == 0
-                               ? 0.0
-                               : value.draw - node.draw_sum / static_cast<double>(node.visits);
+        value.q_delta =
+            node.visits == 0 ? 0.0 : value.q - node.value_sum / static_cast<double>(node.visits);
+        value.draw_delta =
+            node.visits == 0 ? 0.0 : value.draw - node.draw_sum / static_cast<double>(node.visits);
         value.moves_delta =
             value.moves_left && node.visits != 0 && node.moves_left_samples == node.visits
                 ? *value.moves_left -
@@ -1590,15 +1757,17 @@ struct SearchEngine::Impl {
             return {};
         }
     };
-    [[nodiscard]] static Result<nn::PolicyIndices> policy_indices(const Request& request) {
-        nn::PolicyIndices policy;
+    // Writes the policy index of every legal move of the request. Entries past `size` keep
+    // whatever the row held before; every reader stops at `size`.
+    [[nodiscard]] static Result<void> policy_indices(const Request& request,
+                                                     nn::PolicyIndices& policy) {
         policy.size = request.legal.size();
         for (std::size_t i = 0; i < policy.size; ++i) {
             const auto index = nn::PolicyMap::index(request.legal[i], request.side);
             if (!index) return tl::unexpected(index.error());
             policy.values.at(i) = *index;
         }
-        return policy;
+        return {};
     }
     // Lc0 classic/search.cc ApplyDirichletNoise. Runs on the priors the root is about to take.
     [[nodiscard]] Result<void> apply_root_noise_locked(Request& request) {
@@ -1635,9 +1804,8 @@ struct SearchEngine::Impl {
             const bool noisy_root = config.noise_epsilon != 0.0 && request.path.size == 1;
             auto low_id = noisy_root ? kNoLow : tree->find_low(request.low_key);
             if (low_id == kNoLow) {
-                auto created = tree->create_low(request.low_key,
-                                                {request.seeds.data(), request.legal.size()},
-                                                !noisy_root);
+                auto created = tree->create_low(
+                    request.low_key, {request.seeds.data(), request.legal.size()}, !noisy_root);
                 if (!created) return tl::unexpected(created.error());
                 low_id = *created;
                 auto& shared = tree->low(low_id);
@@ -1651,8 +1819,7 @@ struct SearchEngine::Impl {
             auto attached = tree->attach_low(leaf_id, low_id);
             if (!attached) return attached;
         } else {
-            auto expanded =
-                tree->expand(leaf_id, {request.seeds.data(), request.legal.size()});
+            auto expanded = tree->expand(leaf_id, {request.seeds.data(), request.legal.size()});
             if (!expanded) return tl::unexpected(expanded.error());
         }
         leaf.leaf_q = static_cast<float>(value.q);
@@ -1696,8 +1863,8 @@ struct SearchEngine::Impl {
     // lc0 fd71a2d classic/search.cc ProcessPickedTask: classify and encode one
     // picked visit outside the tree lock. Known leaves, new terminals and cache
     // hits back up immediately (out of order); the rest wait for the NN.
-    [[nodiscard]] Result<void> process_request(Slot& slot, Worker& worker, Request& request,
-                                               nn::InputPlanes& input) {
+    [[nodiscard]] Result<void> process_request(Slot& slot, Worker& worker, std::size_t row) {
+        auto& request = slot.requests[row];
         // lc0 ProcessPickedTask: with OutOfOrderEval off a value needing no NN stays in the
         // minibatch and backs up with it.
         const auto defer = [&](double q, double draw, std::optional<double> moves_left) {
@@ -1708,14 +1875,12 @@ struct SearchEngine::Impl {
         };
         if (request.known) {
             const std::lock_guard lock(tree_mutex);
-            const auto& leaf = tree->node(request.path.nodes.at(request.path.size - 1));
+            const auto value = known_value_locked(request);
             if (!config.gather.out_of_order_eval) {
-                defer(leaf.leaf_q, leaf.leaf_draw, leaf.leaf_moves_left);
+                defer(value.q, value.draw, value.moves_left);
                 return {};
             }
-            backup_locked(
-                request,
-                {.q = leaf.leaf_q, .draw = leaf.leaf_draw, .moves_left = leaf.leaf_moves_left});
+            backup_locked(request, value);
             ++slot.out_of_order_count;
             if (limits.log_search_stats) ++diagnostics.out_of_order;
             return {};
@@ -1757,7 +1922,9 @@ struct SearchEngine::Impl {
             config.tablebase->can_probe(replay.position)) {
             if (const auto wdl = config.tablebase->probe_wdl(replay.position, attacks)) {
                 tb_hits.fetch_add(1, std::memory_order_relaxed);
-                const double q = *wdl == TablebaseWdl::Win ? 1.0 : *wdl == TablebaseWdl::Loss ? -1.0 : 0.0;
+                const double q = *wdl == TablebaseWdl::Win    ? 1.0
+                                 : *wdl == TablebaseWdl::Loss ? -1.0
+                                                              : 0.0;
                 const double draw = q == 0.0 ? 1.0 : 0.0;
                 const std::lock_guard lock(tree_mutex);
                 const auto& parent = tree->node(request.path.nodes.at(request.path.size - 2));
@@ -1769,15 +1936,21 @@ struct SearchEngine::Impl {
                 auto& leaf = tree->node(request.path.nodes.at(request.path.size - 1));
                 leaf.state = NodeState::Terminal;
                 leaf.proof = !config.terminal_proof ? NodeProof{}
-                             : q > 0.0 ? NodeProof{.outcome = ProofOutcome::Win,
-                                                   .mate_upper_bound = kTablebaseMateDistance}
-                             : q < 0.0 ? NodeProof{.outcome = ProofOutcome::Loss,
-                                                   .mate_upper_bound = kTablebaseMateDistance}
-                                       : NodeProof{.outcome = ProofOutcome::Draw};
+                             : q > 0.0              ? NodeProof{.outcome = ProofOutcome::Win,
+                                                                .mate_upper_bound = kTablebaseMateDistance}
+                             : q < 0.0              ? NodeProof{.outcome = ProofOutcome::Loss,
+                                                                .mate_upper_bound = kTablebaseMateDistance}
+                                                    : NodeProof{.outcome = ProofOutcome::Draw};
                 leaf.leaf_q = static_cast<float>(q);
                 leaf.leaf_draw = static_cast<float>(draw);
                 leaf.twofold = false;
                 leaf.leaf_moves_left = static_cast<float>(moves_left);
+                // Lc0 ExtendNode "node->MakeTerminal(GameResult::BLACK_WON, m,
+                // Node::Terminal::Tablebase)" for a WDL win, which clears the prior of the move
+                // that led here (Node::MakeTerminal), with or without StickyEndgames.
+                if (q > 0.0 && config.proof_zeroes_losing_prior && !config.dag)
+                    zero_losing_prior_locked(request.path.nodes.at(request.path.size - 2),
+                                             request.path.nodes.at(request.path.size - 1));
                 if (!config.gather.out_of_order_eval) {
                     defer(q, draw, moves_left);
                     return {};
@@ -1814,14 +1987,18 @@ struct SearchEngine::Impl {
         if (!encoded) return tl::unexpected(encoded.error());
         request.legal = status->legal_moves;
         request.side = replay.position.side_to_move();
-        input = *encoded;
+        slot.inputs[row] = *encoded;
+        // The row's policy indices are mapped once, here: the cache lookup below, the evaluator
+        // and the cache insert after it all read this copy, which the gather moves with the input.
+        if (evaluator) {
+            auto mapped = policy_indices(request, slot.policies[row]);
+            if (!mapped) return mapped;
+        }
         // Deterministic mode preserves identical cache-on/off batch barriers. With OutOfOrderEval
         // off a cached position takes its row in the batch: it reaches the same value in batch
         // order, at the cost of one more evaluation.
         if (legal_cache && !config.deterministic && config.gather.out_of_order_eval) {
-            const auto policy = policy_indices(request);
-            if (!policy) return tl::unexpected(policy.error());
-            const auto cached = legal_cache->lookup(input, *policy);
+            const auto cached = legal_cache->lookup(slot.inputs[row], slot.policies[row]);
             if (!cached) return tl::unexpected(cached.error());
             const auto& value = *cached;
             if (value.has_value()) {
@@ -1857,11 +2034,9 @@ struct SearchEngine::Impl {
             const auto next = slot.next.fetch_add(1, std::memory_order_relaxed);
             if (next >= rows) break;
             try {
-                auto result =
-                    selected == WorkPhase::Publish
-                        ? prepare_row(slot, next)
-                        : process_request(slot, worker, slot.requests[slot.picked.at(next)],
-                                          slot.inputs[slot.picked.at(next)]);
+                auto result = selected == WorkPhase::Publish
+                                  ? prepare_row(slot, next)
+                                  : process_request(slot, worker, slot.picked.at(next));
                 if (!result) {
                     slot.halt.store(true, std::memory_order_relaxed);
                     const std::lock_guard error_lock(work_mutex);
@@ -1913,9 +2088,12 @@ struct SearchEngine::Impl {
             lock.unlock();
             try {
                 nn::EvaluationTiming timing;
+                // The rows handed to the provider path before padding (timing.positions is after).
+                std::size_t logical = 0;
                 const auto evaluate = [&]() -> Result<void> {
                     if (evaluator) {
                         const auto rows = selected->count + selected->prefetched;
+                        logical = rows;
                         return evaluator->evaluate({selected->inputs.data(), rows},
                                                    {selected->policies.data(), rows},
                                                    {selected->legal_outputs.data(), rows},
@@ -1931,6 +2109,7 @@ struct SearchEngine::Impl {
                     const auto began = limits.log_search_stats ? Clock::now() : Clock::time_point{};
                     auto evaluated = backend.evaluate({selected->inputs.data(), selected->count},
                                                       {selected->outputs.data(), selected->count});
+                    logical = selected->count;
                     if (limits.log_search_stats) {
                         timing.positions = backend.physical_batch_size(selected->count);
                         timing.provider = Clock::now() - began;
@@ -1941,6 +2120,7 @@ struct SearchEngine::Impl {
                 if (limits.log_search_stats && timing.positions != 0) {
                     const std::lock_guard stats_lock(tree_mutex);
                     ++diagnostics.batch_sizes.at(timing.positions);
+                    ++diagnostics.logical_batch_sizes.at(logical);
                     diagnostics.provider += timing.provider;
                 }
                 // The provider thread only evaluates. The coordinator backs the
@@ -2147,15 +2327,14 @@ struct SearchEngine::Impl {
             if (slot.out_of_order_count != out_of_order_before)
                 cancel_round_collisions_locked(slot, first_collision, first_collision_node);
         }
-        // Compact only inputs, retaining stable Request/RAII addresses.
+        // Compact only inputs and their policy indices, retaining stable Request/RAII addresses.
+        // A row moves down or stays, so it never lands on one that has yet to move.
         for (std::size_t i = 0; i < config.maximum_batch; ++i) {
             if (!slot.requests[i].ready) continue;
             slot.rows[slot.count] = i;
-            if (slot.count != i) slot.inputs[slot.count] = slot.inputs[i];
-            if (evaluator) {
-                const auto policy = policy_indices(slot.requests.at(i));
-                if (!policy) return tl::unexpected(policy.error());
-                slot.policies.at(slot.count) = *policy;
+            if (slot.count != i) {
+                slot.inputs[slot.count] = slot.inputs[i];
+                if (evaluator) slot.policies[slot.count] = slot.policies[i];
             }
             ++slot.count;
         }
@@ -2220,8 +2399,8 @@ struct SearchEngine::Impl {
         if (!legal_cache || config.deterministic || config.dag || workers.empty() ||
             slot.count == 0)
             return;
-        const auto limit = std::min<std::size_t>(config.gather.max_prefetch,
-                                                 limits.maximum_batch.value_or(config.maximum_batch));
+        const auto limit = std::min<std::size_t>(
+            config.gather.max_prefetch, limits.maximum_batch.value_or(config.maximum_batch));
         if (slot.count >= limit || should_stop_locked()) return;
         auto& worker = workers.back();
         if (!worker.position) return;
@@ -2234,10 +2413,11 @@ struct SearchEngine::Impl {
         const Node* node = id == kNoNode ? nullptr : &tree->node(id);
         // A leaf nothing has started on yet.
         if (!node || node->visits + node->in_flight == 0) return prefetch_leaf(slot, worker);
-        // Being extended by a visit in flight, or terminal: nothing to prefetch here.
+        // Being extended by a visit in flight, or terminal: nothing to prefetch here (lc0
+        // v0.32.1 PrefetchIntoCache: "if (node->IsTerminal()) return 0;", proven nodes included).
         if (node->visits == 0 || node->state == NodeState::Terminal ||
             node->state == NodeState::Frontier || depth >= ceiling() ||
-            depth + 1 >= config.max_depth)
+            depth + 1 >= config.max_depth || proof_terminal(*node, depth))
             return 0;
         struct Scored {
             double score = 0;
@@ -2257,10 +2437,9 @@ struct SearchEngine::Impl {
         const double fpu = first_play_urgency(config.selection, at_root, parent_q, mass);
         const double multiplier = exploration_multiplier(config.selection, selection_visits(id));
         const auto q_of = [&](const Node* child, double unvisited) {
-            return child && child->visits != 0
-                       ? (draw_score * child->draw_sum - child->value_sum) /
-                             static_cast<double>(child->visits)
-                       : unvisited;
+            return child && child->visits != 0 ? (draw_score * child->draw_sum - child->value_sum) /
+                                                     static_cast<double>(child->visits)
+                                               : unvisited;
         };
         for (std::size_t i = 0; i < edges.size(); ++i) {
             const auto& edge = edges[i];
@@ -2268,10 +2447,10 @@ struct SearchEngine::Impl {
             if (prior == 0.0F || (at_root && !allowed(edge.move))) continue;
             const Node* child = edge.child == kNoNode ? nullptr : &tree->node(edge.child);
             const auto visits_started = child ? child->visits + child->in_flight : 0;
-            scored[count++] = {.score = -(multiplier * prior /
-                                          (1.0 + static_cast<double>(visits_started))) -
-                                        q_of(child, fpu),
-                               .index = static_cast<std::uint32_t>(i)};
+            scored[count++] = {
+                .score = -(multiplier * prior / (1.0 + static_cast<double>(visits_started))) -
+                         q_of(child, fpu),
+                .index = static_cast<std::uint32_t>(i)};
         }
         std::size_t first_unsorted = 0;
         std::int64_t total = 0;
@@ -2280,10 +2459,11 @@ struct SearchEngine::Impl {
             // Lc0 sorts the next chunk of three at a time; most walks stop early.
             if (first_unsorted != count && i + 2 >= first_unsorted) {
                 const auto next = std::min(count, first_unsorted + (budget < 2 ? 2U : 3U));
-                std::partial_sort(scored.begin() + static_cast<std::ptrdiff_t>(first_unsorted),
-                                  scored.begin() + static_cast<std::ptrdiff_t>(next),
-                                  scored.begin() + static_cast<std::ptrdiff_t>(count),
-                                  [](const Scored& a, const Scored& b) { return a.score < b.score; });
+                std::partial_sort(
+                    scored.begin() + static_cast<std::ptrdiff_t>(first_unsorted),
+                    scored.begin() + static_cast<std::ptrdiff_t>(next),
+                    scored.begin() + static_cast<std::ptrdiff_t>(count),
+                    [](const Scored& a, const Scored& b) { return a.score < b.score; });
                 first_unsorted = next;
             }
             const auto& edge = edges[scored[i].index];
@@ -2554,9 +2734,8 @@ struct SearchEngine::Impl {
         float sum = 0.0F;
         for (const auto& edge : edges) {
             if (!allowed(edge.move) || q_of(edge) < min_eval) continue;
-            const float weight = max_n <= 0.0F
-                                     ? decode_prior(edge.prior_bits)
-                                     : (static_cast<float>(n_of(edge)) + offset) / max_n;
+            const float weight = max_n <= 0.0F ? decode_prior(edge.prior_bits)
+                                               : (static_cast<float>(n_of(edge)) + offset) / max_n;
             sum += std::pow(std::max(0.0F, weight), 1.0F / temperature);
             sums.at(count) = sum;
             candidates.at(count++) = &edge;
@@ -2564,7 +2743,8 @@ struct SearchEngine::Impl {
         if (count == 0 || sum <= 0.0F) return no_temperature();
         const float toss = std::uniform_real_distribution<float>(0.0F, sum)(random);
         const auto at = static_cast<std::size_t>(
-            std::lower_bound(sums.begin(), sums.begin() + static_cast<std::ptrdiff_t>(count), toss) -
+            std::lower_bound(sums.begin(), sums.begin() + static_cast<std::ptrdiff_t>(count),
+                             toss) -
             sums.begin());
         return candidates.at(std::min(at, count - 1))->move;
     }
@@ -2769,7 +2949,8 @@ struct SearchEngine::Impl {
             {
                 const std::lock_guard lock(tree_mutex);
                 if (should_stop_locked()) return;
-                const auto playouts = tree->node(0).visits - std::min(inherited, tree->node(0).visits);
+                const auto playouts =
+                    tree->node(0).visits - std::min(inherited, tree->node(0).visits);
                 const auto elapsed =
                     std::chrono::duration<double, std::milli>(Clock::now() - started).count();
                 if (elapsed <= 0.0 ||
@@ -3187,6 +3368,7 @@ Result<ReuseSummary> SearchEngine::advance(chess::Move move) {
             return tl::unexpected("Search continuation cleared root: " + invalidated.error());
         }
         if (*invalidated) summary = {.kept_nodes = 1, .kept_edges = 0, .reset_terminal_root = true};
+        impl_->make_root_not_terminal_locked();
         impl_->limits.searchmoves_count = 0;
         impl_->inherited = impl_->tree->node(0).visits;
         // A DAG has too many paths to walk; this search's own depth still counts from zero.
@@ -3320,10 +3502,9 @@ std::vector<std::string> SearchEngine::verbose_move_stats(bool chess960) const {
     for (const auto& edge : edges)
         if (edge.child != kNoNode && tree.node(edge.child).visits != 0)
             mass += decode_prior(edge.prior_bits);
-    const double parent_q =
-        node.visits == 0
-            ? 0
-            : (node.value_sum + draw_score * node.draw_sum) / static_cast<double>(node.visits);
+    const double parent_q = node.visits == 0 ? 0
+                                             : (node.value_sum + draw_score * node.draw_sum) /
+                                                   static_cast<double>(node.visits);
     const double fpu = first_play_urgency(config.selection, true, parent_q, mass);
     const double multiplier = exploration_multiplier(config.selection, impl_->selection_visits(0));
     const auto rescale = impl_->wdl_rescale;
@@ -3358,9 +3539,8 @@ std::vector<std::string> SearchEngine::verbose_move_stats(bool chess960) const {
         auto wl = static_cast<float>(sign * shown->value_sum / visits);
         auto draw = static_cast<float>(shown->draw_sum / visits);
         reported(wl, draw);
-        const auto moves = shown->moves_left_samples == shown->visits
-                               ? shown->moves_left_sum / visits
-                               : 0.0;
+        const auto moves =
+            shown->moves_left_samples == shown->visits ? shown->moves_left_sum / visits : 0.0;
         out << "(WL: " << std::setw(8) << std::setprecision(5) << wl << ") ";
         out << "(D: " << std::setw(5) << std::setprecision(3) << draw << ") ";
         out << "(M: " << std::setw(4) << std::setprecision(1) << moves << ") ";
@@ -3410,7 +3590,8 @@ std::vector<std::string> SearchEngine::verbose_move_stats(bool chess960) const {
         const auto index = nn::PolicyMap::index(edge.move, side);
         std::ostringstream out;
         head(out, chess::move_to_uci(edge.move, chess960), index ? *index : 0,
-             child ? child->visits : 0, child ? child->in_flight : 0, decode_prior(edge.prior_bits));
+             child ? child->visits : 0, child ? child->in_flight : 0,
+             decode_prior(edge.prior_bits));
         stats(out, child, -1.0);
         out << "(U: " << std::setw(6) << std::setprecision(5) << u << ") ";
         out << "(S: " << std::setw(8) << std::setprecision(5) << q + u + m << ") ";

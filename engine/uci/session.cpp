@@ -2,8 +2,8 @@
 #include "engine/uci/session.h"
 
 #include <algorithm>
-#include <atomic>
 #include <array>
+#include <atomic>
 #include <chrono>
 #include <cmath>
 #include <condition_variable>
@@ -170,7 +170,6 @@ struct Session::Impl {
         std::atomic<std::shared_ptr<const View>> published{std::make_shared<const View>()};
         std::uint64_t inherited = 0, game_ply = 0;
         std::atomic<bool> done{false}, primed{false}, stop_requested{false};
-        std::atomic<bool> hold_completed{false};
         Turn(State configured, GoCommand request, search::SearchLimits bounded,
              TimeBudget allocated, Clock::time_point accepted)
             : state(std::move(configured)),
@@ -279,9 +278,9 @@ struct Session::Impl {
     void log_line(std::string_view direction, std::string_view line) {
         if (log_stream.is_open()) {
             const auto now = std::chrono::system_clock::now();
-            const auto micros = std::chrono::duration_cast<std::chrono::microseconds>(
-                                    now.time_since_epoch())
-                                    .count();
+            const auto micros =
+                std::chrono::duration_cast<std::chrono::microseconds>(now.time_since_epoch())
+                    .count();
             log_stream << micros << ' ' << direction << ' ' << line << '\n' << std::flush;
             if (!log_stream) log_stream.close();
         }
@@ -465,9 +464,14 @@ struct Session::Impl {
             neural_cache.reset();
         }
         if (!neural_cache && state.options.nncache_entries != 0) {
-            auto cache = nn::LegalCache::create(state.options.nncache_entries,
-                                                backend->info().cache_namespace,
-                                                state.options.cache_history_length);
+            // lc0 v0.32.1 neural/memcache.cc ComputeEvalPositionHash keys on the last
+            // position's board and repetitions only, so at the default history length the
+            // rule-50 count stays out of the key. The index is reserved up front: growing
+            // it rehashes under the cache lock while every search thread waits.
+            auto cache = nn::LegalCache::create(
+                state.options.nncache_entries, backend->info().cache_namespace,
+                state.options.cache_history_length,
+                {.key_rule50 = state.options.cache_history_length != 0, .reserve_index = true});
             if (!cache) return tl::unexpected(cache.error());
             neural_cache = std::move(*cache);
         }
@@ -747,10 +751,10 @@ struct Session::Impl {
                  .type = chosen.score_type,
                  .draw_score_q = static_cast<float>(q + draw_score * draw),
                  .rescale_ratio = rescale.ratio,
-                 .rescale_diff =
-                     contempt_side == search::ContemptSide::None
-                         ? 0.0F
-                         : rescale.diff * static_cast<float>(chosen.search.draw_rate.eval_objectivity),
+                 .rescale_diff = contempt_side == search::ContemptSide::None
+                                     ? 0.0F
+                                     : rescale.diff * static_cast<float>(
+                                                          chosen.search.draw_rate.eval_objectivity),
                  .rescale_sign =
                      (contempt_side == search::ContemptSide::Black) == black_root ? 1.0F : -1.0F,
                  .max_s = static_cast<float>(chosen.search.draw_rate.max_s)});
@@ -790,8 +794,8 @@ struct Session::Impl {
             // lc0 SendUciInfo: (1 + edge M, or 1 + the root's M with no visits) / 2, in moves.
             if (chosen.show_moves_left) {
                 const auto own = root ? root->moves_left : std::nullopt;
-                const auto fallback = info.moves_left ? std::optional{1.0 + *info.moves_left}
-                                                      : std::nullopt;
+                const auto fallback =
+                    info.moves_left ? std::optional{1.0 + *info.moves_left} : std::nullopt;
                 if (const auto moves = own ? own : fallback)
                     line << " movesleft " << static_cast<int>((1.0 + *moves) / 2.0);
             }
@@ -803,7 +807,9 @@ struct Session::Impl {
             static_cast<void>(emit(line.str()));
         }
     }
-    void report_stats(const search::SearchStats& stats) {
+    // schedule_exhausted is 1 for a timed move whose remaining time fit no physical root path,
+    // so it was played from its prime alone (search_turn).
+    void report_stats(const search::SearchStats& stats, bool schedule_exhausted) {
         std::uint64_t batches = 0, positions = 0, maximum = 0, p50 = 0, cumulative = 0;
         for (std::size_t i = 1; i < stats.batch_sizes.size(); ++i) {
             batches += stats.batch_sizes.at(i);
@@ -824,17 +830,17 @@ struct Session::Impl {
              << " p50 " << p50 << " max " << maximum << " collisions " << stats.collisions
              << " ooo " << stats.out_of_order << " proof_scans " << stats.proof_scans
              << " selection_hits " << stats.selection_hits << " twofold_reverts "
-             << stats.twofold_reverts << " gather_ms " << ms(stats.gather) << " nn_wait_ms "
-             << ms(stats.nn_wait) << " backup_ms " << ms(stats.backup) << " provider_ms "
-             << ms(stats.provider) << " wall_ms " << ms(stats.wall) << " gpu_idle_ms "
+             << stats.twofold_reverts << " schedule_exhausted " << (schedule_exhausted ? 1 : 0)
+             << " gather_ms " << ms(stats.gather) << " nn_wait_ms " << ms(stats.nn_wait)
+             << " backup_ms " << ms(stats.backup) << " provider_ms " << ms(stats.provider)
+             << " wall_ms " << ms(stats.wall) << " gpu_idle_ms "
              << ms(std::max(stats.wall - stats.provider, std::chrono::nanoseconds::zero()))
              << " idle_basis host_provider_gaps";
         static_cast<void>(emit(line.str()));
     }
     // Evaluates in batches the backend's largest bucket can hold.
     [[nodiscard]] Result<void> evaluate_rows(std::span<const nn::InputPlanes> inputs,
-                                             std::span<nn::NNOutput> outputs,
-                                             std::size_t bucket) {
+                                             std::span<nn::NNOutput> outputs, std::size_t bucket) {
         for (std::size_t at = 0; at < inputs.size(); at += bucket) {
             const auto rows = std::min(bucket, inputs.size() - at);
             auto done = backend->evaluate(inputs.subspan(at, rows), outputs.subspan(at, rows));
@@ -910,7 +916,7 @@ struct Session::Impl {
                     scores[i] = {.negative_q = -1, .draw = 0, .mate = 1};
                 } else if (replies.empty() || child.is_rule50_draw() ||
                            child.insufficient_material() || child.is_repetition(3)) {
-                    scores[i] = {.negative_q = 0, .draw = 1};
+                    scores[i] = {.negative_q = 0, .draw = 1, .mate = std::nullopt};
                 } else {
                     auto next = frames;
                     auto appended = next.append(child);
@@ -926,7 +932,7 @@ struct Session::Impl {
             if (!done) return done;
             for (std::size_t row = 0; row < rows.size(); ++row) {
                 const auto [q, draw] = wdl_value(outputs[row]);
-                scores[rows[row]] = {.negative_q = q, .draw = draw};
+                scores[rows[row]] = {.negative_q = q, .draw = draw, .mate = std::nullopt};
             }
             std::size_t best = 0;
             const auto better = [](const Score& a, const Score& b) {
@@ -1009,31 +1015,31 @@ struct Session::Impl {
         changed.notify_all();
         std::array<BucketCost, BucketLatencies::kCapacity> bucket_storage{};
         const auto measured = bucket_latency.snapshot(bucket_storage);
-        const auto schedule = schedule_search(
-            turn.time, turn.started, Clock::now(), root_latency.estimate(),
-            buckets(turn.state.options), minibatch(turn.state.options), measured);
+        const auto schedule =
+            schedule_search(turn.time, turn.started, Clock::now(), root_latency.estimate(),
+                            buckets(turn.state.options), minibatch(turn.state.options), measured);
         bounded.deadline = schedule.deadline;
         bounded.maximum_batch = schedule.maximum_batch;
         if (turn.command.ponder && !turn.command.infinite) {
             const auto& hit_time = turn.ponder_budget;
             const auto now = Clock::now();
             const auto hit_schedule =
-                hit_time
-                    ? schedule_search(*hit_time, now, now, root_latency.estimate(),
-                                      buckets(turn.state.options), minibatch(turn.state.options),
-                                      measured)
-                    : SearchSchedule{
-                          .deadline = std::nullopt, .maximum_batch = 1, .exhausted = true};
+                hit_time ? schedule_search(*hit_time, now, now, root_latency.estimate(),
+                                           buckets(turn.state.options),
+                                           minibatch(turn.state.options), measured)
+                         : SearchSchedule{
+                               .deadline = std::nullopt, .maximum_batch = 1, .exhausted = true};
             bounded.maximum_batch = hit_schedule.exhausted ? 1 : hit_schedule.maximum_batch;
             if (!hit_time || !hit_time->budget) bounded.maximum_batch = 1;
         }
         const bool complete = bounded.nodes && result->info.nodes >= *bounded.nodes;
-        // A known slow provider may not fit the remaining physical budget.
-        // Avoid accepting it, but do not mistake that forecast for a TM stop:
-        // the independent publisher still uses the full allocation.
-        if (!complete && schedule.exhausted && turn.time.budget &&
-            result->reason != search::StopReason::Terminal)
-            turn.hold_completed.store(true, std::memory_order_release);
+        // A known slow provider may not fit the remaining physical budget. Its call is not
+        // accepted (it could drain into the next move's clock), so nothing more is searched, and
+        // the prime result is published as soon as this turn is done: waiting for the deadline
+        // would add no nodes. The deadline still bounds publication, and the time not spent goes
+        // back to the time manager, whose bank credits the allocation less the elapsed time.
+        const bool exhausted_schedule =
+            schedule.exhausted && !complete && result->reason != search::StopReason::Terminal;
         if (!turn.cancel.stop_requested() && result->reason != search::StopReason::Terminal &&
             !schedule.exhausted && !complete) {
             result = engine->run(bounded);
@@ -1044,7 +1050,7 @@ struct Session::Impl {
             publish_view(turn);
             totals += result->stats;
         }
-        if (turn.state.options.log_search_stats) report_stats(totals);
+        if (turn.state.options.log_search_stats) report_stats(totals, exhausted_schedule);
         if (turn.state.options.verbose_move_stats)
             for (const auto& line : engine->verbose_move_stats(turn.state.options.chess960))
                 static_cast<void>(emit("info string " + line));
@@ -1149,8 +1155,7 @@ struct Session::Impl {
                 }
                 if ((turn->stop_requested.load(std::memory_order_acquire) &&
                      turn->primed.load(std::memory_order_acquire)) ||
-                    (done && !turn->time.hold_until_signal &&
-                     !turn->hold_completed.load(std::memory_order_acquire)))
+                    (done && !turn->time.hold_until_signal))
                     break;
                 if (now >= next_report || (done && !reported_completion)) {
                     // The final report supersedes periodic output in this interval.
@@ -1169,8 +1174,7 @@ struct Session::Impl {
                            (turn->stop_requested.load(std::memory_order_acquire) &&
                             turn->primed.load(std::memory_order_acquire)) ||
                            (!turn->time.hold_until_signal &&
-                            turn->done.load(std::memory_order_acquire) &&
-                            !turn->hold_completed.load(std::memory_order_acquire));
+                            turn->done.load(std::memory_order_acquire));
                 });
             }
             const auto delivery_started = Clock::now();

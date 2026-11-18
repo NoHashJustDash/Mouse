@@ -277,6 +277,35 @@ TEST_CASE("Reverting a stale tree-twofold removes exactly its visits from every 
         CHECK(leaf.state == mouse::search::NodeState::Terminal);
         return;
     }
+    SECTION("A proven root keeps its mean moves left at the reduced visit count") {
+        // Proven below an earlier root, it may have replaced those samples by its own
+        // (Lc0 Node::MakeTerminal m_), so they cannot be subtracted as cycle + distance.
+        root.proof = proof(Win, 3);
+        root.value_sum = 20;
+        root.draw_sum = 0;
+        REQUIRE(tree.revert_twofold(ancestors, 2));
+        CHECK(root.moves_left_samples == 17);
+        CHECK(root.moves_left_sum == 15.0 * 17);
+        CHECK(middle.moves_left_samples == 7);
+        CHECK(middle.moves_left_sum == 100 - 3 * 5);
+    }
+    SECTION("A proven node below the root leaves the revert undone") {
+        // Above it every sample was replaced by its exact result (search backup), so the draws
+        // can no longer be told apart from the rest.
+        middle.proof = proof(Win, 1);
+        middle.value_sum = 10;
+        middle.draw_sum = 0;
+        CHECK_FALSE(tree.revert_twofold(ancestors, 2));
+        CHECK(root.visits == 20);
+        CHECK(root.value_sum == -1.5);
+        CHECK(root.draw_sum == 9);
+        CHECK(root.moves_left_sum == 300);
+        CHECK(middle.visits == 10);
+        CHECK(middle.value_sum == 10);
+        CHECK(leaf.state == mouse::search::NodeState::Terminal);
+        CHECK(leaf.visits == 3);
+        return;
+    }
     CHECK(leaf.state == mouse::search::NodeState::Unexpanded);
     CHECK(leaf.visits == 0);
     CHECK(leaf.draw_sum == 0);

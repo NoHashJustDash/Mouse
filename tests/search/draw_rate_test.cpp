@@ -126,7 +126,7 @@ TEST_CASE("Draw-rate rescaling caps a broad network WDL width at WDLMaxS", "[sea
 
 TEST_CASE("Draw-rate rescaling leaves near-certain WDL unchanged", "[search][draw-rate]") {
     const auto ratio = draw_rate_ratio({.target = 0.7, .reference = 0.5});
-    for (const auto [q0, d0] : {std::pair{1.0F, 0.0F},
+    for (const auto& [q0, d0] : {std::pair{1.0F, 0.0F},
                                 {0.99995F, 0.00004F},
                                 {0.0F, 1.0F},
                                 {-0.5F, 0.5F},

@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <bit>
+#include <cstring>
 namespace mouse {
 namespace {
 // Independent, bounds-safe implementation of Austin Appleby's public-domain
@@ -14,6 +15,18 @@ std::uint64_t little_endian(std::span<const std::byte> bytes) noexcept {
     for (std::size_t i = 0; i < bytes.size(); ++i)
         result |= std::to_integer<std::uint64_t>(bytes[i]) << (8 * i);
     return result;
+}
+// A full 8-byte block read as a little-endian word. On a little-endian host the
+// in-memory bytes already are that word, so one unaligned-safe memcpy replaces
+// the byte loop; any other host keeps the portable byte assembly.
+std::uint64_t block(std::span<const std::byte, 8> bytes) noexcept {
+    if constexpr (std::endian::native == std::endian::little) {
+        std::uint64_t result = 0;
+        std::memcpy(&result, bytes.data(), sizeof result);
+        return result;
+    } else {
+        return little_endian(bytes);
+    }
 }
 std::uint64_t scramble(std::uint64_t word, std::uint64_t first, int rotation,
                        std::uint64_t second) noexcept {
@@ -29,9 +42,9 @@ Hash128 hash128(std::span<const std::byte> bytes, std::uint32_t seed) noexcept {
     const auto size = static_cast<std::uint64_t>(bytes.size());
     std::uint64_t first = seed, second = seed;
     while (bytes.size() >= 16) {
-        first ^= scramble(little_endian(bytes.first(8)), kFirst, 31, kSecond);
+        first ^= scramble(block(bytes.first<8>()), kFirst, 31, kSecond);
         first = (std::rotl(first, 27) + second) * 5 + 0x52dce729ULL;
-        second ^= scramble(little_endian(bytes.subspan(8, 8)), kSecond, 33, kFirst);
+        second ^= scramble(block(bytes.subspan<8, 8>()), kSecond, 33, kFirst);
         second = (std::rotl(second, 31) + first) * 5 + 0x38495ab5ULL;
         bytes = bytes.subspan(16);
     }
